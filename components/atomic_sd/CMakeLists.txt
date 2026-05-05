@@ -1,0 +1,13 @@
+idf_component_register(
+    SRCS
+        "src/atomic_sd.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        esp_driver_sdspi
+        fatfs
+        sdmmc
+        atomic_util
+        atomic_bits
+        atomic_gpio
+)

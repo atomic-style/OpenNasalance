@@ -1,0 +1,8 @@
+dependencies:
+  lvgl/lvgl:
+    version: '>=9.4.0'
+  idf:
+    version: '>=5.5'
+description: Atomic LVGL Component
+url: https://github.com/atomic-style/atomic_lvgl
+version: 1.0.0

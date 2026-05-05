@@ -1,0 +1,23 @@
+idf_component_register(
+    SRCS
+        "src/init.c"
+        "src/init_display.c"
+        "src/init_touch.c"
+        "src/nasometer.c"
+        "main.c"
+    INCLUDE_DIRS
+        "include"
+    PRIV_REQUIRES
+        atomic_nvs
+        atomic_events
+        atomic_info
+        atomic_bits
+        atomic_gpio
+        atomic_util
+        atomic_lcd
+        atomic_lvgl
+        atomic_mic
+        atomic_touch
+        atomic_sd
+        atomic_bme280
+)

@@ -1,0 +1,10 @@
+idf_component_register(
+    SRCS
+        "src/atomic_info.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        atomic_util
+        spi_flash
+        esp_psram
+)

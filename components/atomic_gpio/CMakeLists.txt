@@ -1,0 +1,9 @@
+idf_component_register(
+    SRCS
+        "src/atomic_gpio.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        esp_driver_gpio
+        atomic_util
+)

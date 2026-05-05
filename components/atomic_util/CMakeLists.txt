@@ -1,0 +1,9 @@
+idf_component_register(
+    SRCS
+        "src/atomic_err.c"
+        "src/atomic_log.c"
+        "src/atomic_wave.c"
+    INCLUDE_DIRS
+        "include"
+    PRIV_REQUIRES
+)

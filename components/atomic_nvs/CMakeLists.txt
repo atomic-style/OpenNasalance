@@ -1,0 +1,10 @@
+idf_component_register(
+    SRCS
+        "src/atomic_nvs.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        nvs_flash
+    PRIV_REQUIRES
+        atomic_util
+)

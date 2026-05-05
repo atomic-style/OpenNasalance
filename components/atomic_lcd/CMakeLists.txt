@@ -1,0 +1,23 @@
+idf_component_register(
+    SRCS
+        "main/src/atomic_lcd.c"
+        "main/src/atomic_lcd_jpeg.c"
+        "main/src/atomic_lcd_rgb.c"
+        "main/src/atomic_lcd_test.c"
+        "boards/src/atomic_lcd_tdisplay.c"
+        "boards/src/atomic_lcd_es3n28p.c"
+        "boards/src/atomic_lcd_stubs.c"
+    INCLUDE_DIRS
+        "main/include"
+        "boards/include"
+    REQUIRES
+        esp_lcd
+        espressif__esp_lcd_ili9341
+    PRIV_REQUIRES
+        esp_driver_gpio
+        esp_driver_spi
+        esp_timer
+        atomic_bits
+        atomic_gpio
+        atomic_util
+)

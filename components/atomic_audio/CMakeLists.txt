@@ -1,0 +1,16 @@
+idf_component_register(
+    SRCS
+        "src/atomic_audio.c"
+        "src/atomic_i2s.c"
+        "src/atomic_wav.c"
+        "src/atomic_mp3.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        atomic_util
+        chmorgan__esp-audio-player
+    PRIV_REQUIRES
+        esp_timer
+        esp_driver_gpio
+        esp_driver_i2s
+)

@@ -1,0 +1,11 @@
+idf_component_register(
+    SRCS
+        "src/a_evt.c"
+        "src/a_evt_user.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        atomic_bits
+        atomic_util
+        esp_event
+)

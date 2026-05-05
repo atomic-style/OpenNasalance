@@ -1,0 +1,14 @@
+idf_component_register(
+    SRCS
+        "src/pressure.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        atomic_touch
+    PRIV_REQUIRES
+        atomic_util
+        atomic_lvgl
+        esp_driver_i2c
+        esp_timer
+        lvgl__lvgl
+)

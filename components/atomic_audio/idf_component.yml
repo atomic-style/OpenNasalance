@@ -1,0 +1,10 @@
+dependencies:
+  chmorgan/esp-audio-player:
+    version: '>=1.0.0,<2.0.0'
+  chmorgan/esp-libhelix-mp3:
+    version: '>=1.0.0,<2.0.0'
+  idf:
+    version: '>=5.0'
+description: Atomic Audio Component
+url: https://github.com/atomic-style/atomic_audio
+version: 1.0.0
