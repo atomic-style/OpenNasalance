@@ -1,7 +1,10 @@
-/*
- * SPDX-FileCopyrightText: 2025 Atomic Style, Inc.
- * SPDX-License-Identifier: Apache-2.0
- */
+// Copyright (C) 2026 Atomic Style, LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
 
 #include "driver/gpio.h"
 #include "esp_check.h"
@@ -33,7 +36,8 @@ static const char *TAG = "atomic_lcd_axs";
 static esp_err_t panel_axs_del(esp_lcd_panel_t *panel);
 static esp_err_t panel_axs_reset(esp_lcd_panel_t *panel);
 static esp_err_t panel_axs_init(esp_lcd_panel_t *panel);
-static esp_err_t panel_axs_draw_bitmap(esp_lcd_panel_t *panel, int x_start, int y_start, int x_end, int y_end, const void *color_data);
+static esp_err_t panel_axs_draw_bitmap(esp_lcd_panel_t *panel, int x_start, int y_start, int x_end,
+                                       int y_end, const void *color_data);
 static esp_err_t panel_axs_invert_color(esp_lcd_panel_t *panel, bool invert_color_data);
 static esp_err_t panel_axs_mirror(esp_lcd_panel_t *panel, bool mirror_x, bool mirror_y);
 static esp_err_t panel_axs_swap_xy(esp_lcd_panel_t *panel, bool swap_axes);
@@ -41,12 +45,14 @@ static esp_err_t panel_axs_set_gap(esp_lcd_panel_t *panel, int x_gap, int y_gap)
 static esp_err_t panel_axs_disp_off(esp_lcd_panel_t *panel, bool off);
 
 static esp_err_t touch_axs_read_data(esp_lcd_touch_handle_t tp);
-static bool touch_axs_get_xy(esp_lcd_touch_handle_t tp, uint16_t *x, uint16_t *y, uint16_t *strength, uint8_t *point_num, uint8_t max_point_num);
+static bool touch_axs_get_xy(esp_lcd_touch_handle_t tp, uint16_t *x, uint16_t *y,
+                             uint16_t *strength, uint8_t *point_num, uint8_t max_point_num);
 static esp_err_t touch_axs_del(esp_lcd_touch_handle_t tp);
 static esp_err_t touch_axs_reset(esp_lcd_touch_handle_t tp);
 
 static esp_err_t i2c_read_bytes(esp_lcd_touch_handle_t tp, int reg, uint8_t *data, uint8_t len);
-static esp_err_t i2c_write_bytes(esp_lcd_touch_handle_t tp, int reg, const uint8_t *data, uint8_t len);
+static esp_err_t i2c_write_bytes(esp_lcd_touch_handle_t tp, int reg, const uint8_t *data,
+                                 uint8_t len);
 /*
 typedef struct {
     esp_lcd_panel_t base;
@@ -65,10 +71,13 @@ typedef struct {
     } flags;
 } axs_panel_t;
 */
-esp_err_t atomic_lcd_new_panel_axs(const esp_lcd_panel_io_handle_t io, const esp_lcd_panel_dev_config_t *panel_dev_config, esp_lcd_panel_handle_t *ret_panel) {
+esp_err_t atomic_lcd_new_panel_axs(const esp_lcd_panel_io_handle_t io,
+                                   const esp_lcd_panel_dev_config_t *panel_dev_config,
+                                   esp_lcd_panel_handle_t *ret_panel) {
     esp_err_t ret = ESP_OK;
     axs_panel_t *axs = NULL;
-    ESP_GOTO_ON_FALSE(io && panel_dev_config && ret_panel, ESP_ERR_INVALID_ARG, err, TAG, "invalid argument");
+    ESP_GOTO_ON_FALSE(io && panel_dev_config && ret_panel, ESP_ERR_INVALID_ARG, err, TAG,
+                      "invalid argument");
     axs = calloc(1, sizeof(axs_panel_t));
     ESP_GOTO_ON_FALSE(axs, ESP_ERR_NO_MEM, err, TAG, "no mem for axs panel");
 
@@ -116,8 +125,10 @@ esp_err_t atomic_lcd_new_panel_axs(const esp_lcd_panel_io_handle_t io, const esp
     axs->flags.reset_level = panel_dev_config->flags.reset_active_high;
     if (panel_dev_config->vendor_config) {
         axs->init_cmds = ((axs_vendor_config_t *)panel_dev_config->vendor_config)->init_cmds;
-        axs->init_cmds_size = ((axs_vendor_config_t *)panel_dev_config->vendor_config)->init_cmds_size;
-        axs->flags.use_qspi_interface = ((axs_vendor_config_t *)panel_dev_config->vendor_config)->flags.use_qspi_interface;
+        axs->init_cmds_size =
+            ((axs_vendor_config_t *)panel_dev_config->vendor_config)->init_cmds_size;
+        axs->flags.use_qspi_interface =
+            ((axs_vendor_config_t *)panel_dev_config->vendor_config)->flags.use_qspi_interface;
     }
     axs->base.del = panel_axs_del;
     axs->base.reset = panel_axs_reset;
@@ -143,7 +154,8 @@ err:
     return ret;
 }
 
-static esp_err_t tx_param(axs_panel_t *axs, esp_lcd_panel_io_handle_t io, int lcd_cmd, const void *param, size_t param_size) {
+static esp_err_t tx_param(axs_panel_t *axs, esp_lcd_panel_io_handle_t io, int lcd_cmd,
+                          const void *param, size_t param_size) {
     if (axs->flags.use_qspi_interface) {
         lcd_cmd &= 0xff;
         lcd_cmd <<= 8;
@@ -152,7 +164,8 @@ static esp_err_t tx_param(axs_panel_t *axs, esp_lcd_panel_io_handle_t io, int lc
     return esp_lcd_panel_io_tx_param(io, lcd_cmd, param, param_size);
 }
 
-static esp_err_t tx_color(axs_panel_t *axs, esp_lcd_panel_io_handle_t io, int lcd_cmd, const void *param, size_t param_size) {
+static esp_err_t tx_color(axs_panel_t *axs, esp_lcd_panel_io_handle_t io, int lcd_cmd,
+                          const void *param, size_t param_size) {
     if (axs->flags.use_qspi_interface) {
         lcd_cmd &= 0xff;
         lcd_cmd <<= 8;
@@ -194,48 +207,88 @@ static esp_err_t panel_axs_reset(esp_lcd_panel_t *panel) {
 
 static const axs_lcd_init_cmd_t vendor_specific_init_default[] = {
     {0xBB, (uint8_t[]){0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x5A, 0xA5}, 8, 0},
-    {0xA0, (uint8_t[]){0x00, 0x10, 0x00, 0x02, 0x00, 0x00, 0x64, 0x3F, 0x20, 0x05, 0x3F, 0x3F, 0x00, 0x00, 0x00, 0x00, 0x00}, 17, 0},
-    {0xA2, (uint8_t[]){0x30, 0x04, 0x0A, 0x3C, 0xEC, 0x54, 0xC4, 0x30, 0xAC, 0x28, 0x7F, 0x7F, 0x7F, 0x20, 0xF8, 0x10,
-                       0x02, 0xFF, 0xFF, 0xF0, 0x90, 0x01, 0x32, 0xA0, 0x91, 0xC0, 0x20, 0x7F, 0xFF, 0x00, 0x54},
+    {0xA0,
+     (uint8_t[]){0x00, 0x10, 0x00, 0x02, 0x00, 0x00, 0x64, 0x3F, 0x20, 0x05, 0x3F, 0x3F, 0x00, 0x00,
+                 0x00, 0x00, 0x00},
+     17, 0},
+    {0xA2, (uint8_t[]){0x30, 0x04, 0x0A, 0x3C, 0xEC, 0x54, 0xC4, 0x30, 0xAC, 0x28, 0x7F,
+                       0x7F, 0x7F, 0x20, 0xF8, 0x10, 0x02, 0xFF, 0xFF, 0xF0, 0x90, 0x01,
+                       0x32, 0xA0, 0x91, 0xC0, 0x20, 0x7F, 0xFF, 0x00, 0x54},
      31, 0},
-    {0xD0, (uint8_t[]){0x30, 0xAC, 0x21, 0x24, 0x08, 0x09, 0x10, 0x01, 0xAA, 0x14, 0xC2, 0x00, 0x22, 0x22, 0xAA,
-                       0x03, 0x10, 0x12, 0x40, 0x14, 0x1E, 0x51, 0x15, 0x00, 0x40, 0x10, 0x00, 0x03, 0x3D, 0x12},
+    {0xD0, (uint8_t[]){0x30, 0xAC, 0x21, 0x24, 0x08, 0x09, 0x10, 0x01, 0xAA, 0x14,
+                       0xC2, 0x00, 0x22, 0x22, 0xAA, 0x03, 0x10, 0x12, 0x40, 0x14,
+                       0x1E, 0x51, 0x15, 0x00, 0x40, 0x10, 0x00, 0x03, 0x3D, 0x12},
      30, 0},
-    {0xA3, (uint8_t[]){0xA0, 0x06, 0xAA, 0x08, 0x08, 0x02, 0x0A, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x00, 0x55, 0x55}, 22,
-     0},
-    {0xC1, (uint8_t[]){0x33, 0x04, 0x02, 0x02, 0x71, 0x05, 0x24, 0x55, 0x02, 0x00, 0x41, 0x00, 0x53, 0xFF, 0xFF,
-                       0xFF, 0x4F, 0x52, 0x00, 0x4F, 0x52, 0x00, 0x45, 0x3B, 0x0B, 0x02, 0x0D, 0x00, 0xFF, 0x40},
+    {0xA3, (uint8_t[]){0xA0, 0x06, 0xAA, 0x08, 0x08, 0x02, 0x0A, 0x04, 0x04, 0x04, 0x04,
+                       0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x00, 0x55, 0x55},
+     22, 0},
+    {0xC1, (uint8_t[]){0x33, 0x04, 0x02, 0x02, 0x71, 0x05, 0x24, 0x55, 0x02, 0x00,
+                       0x41, 0x00, 0x53, 0xFF, 0xFF, 0xFF, 0x4F, 0x52, 0x00, 0x4F,
+                       0x52, 0x00, 0x45, 0x3B, 0x0B, 0x02, 0x0D, 0x00, 0xFF, 0x40},
      30, 0},
     {0xC3, (uint8_t[]){0x00, 0x00, 0x00, 0x50, 0x03, 0x00, 0x00, 0x00, 0x01, 0x80, 0x01}, 11, 0},
-    {0xC4, (uint8_t[]){0x00, 0x24, 0x33, 0x90, 0x50, 0xea, 0x64, 0x32, 0xC8, 0x64, 0xC8, 0x32, 0x90, 0x90, 0x11,
-                       0x06, 0xDC, 0xFA, 0x04, 0x03, 0x80, 0xFE, 0x10, 0x10, 0x00, 0x0A, 0x0A, 0x44, 0x50},
+    {0xC4, (uint8_t[]){0x00, 0x24, 0x33, 0x90, 0x50, 0xea, 0x64, 0x32, 0xC8, 0x64,
+                       0xC8, 0x32, 0x90, 0x90, 0x11, 0x06, 0xDC, 0xFA, 0x04, 0x03,
+                       0x80, 0xFE, 0x10, 0x10, 0x00, 0x0A, 0x0A, 0x44, 0x50},
      29, 0},
-    {0xC5,
-     (uint8_t[]){0x18, 0x00, 0x00, 0x03, 0xFE, 0x78, 0x33, 0x20, 0x30, 0x10, 0x88, 0xDE, 0x0D, 0x08, 0x0F, 0x0F, 0x01, 0x78, 0x33, 0x20, 0x10, 0x10, 0x80}, 23,
-     0},
-    {0xC6, (uint8_t[]){0x05, 0x0A, 0x05, 0x0A, 0x00, 0xE0, 0x2E, 0x0B, 0x12, 0x22, 0x12, 0x22, 0x01, 0x00, 0x00, 0x3F, 0x6A, 0x18, 0xC8, 0x22}, 20, 0},
-    {0xC7, (uint8_t[]){0x50, 0x32, 0x28, 0x00, 0xa2, 0x80, 0x8f, 0x00, 0x80, 0xff, 0x07, 0x11, 0x9F, 0x6f, 0xff, 0x26, 0x0c, 0x0d, 0x0e, 0x0f}, 20, 0},
+    {0xC5, (uint8_t[]){0x18, 0x00, 0x00, 0x03, 0xFE, 0x78, 0x33, 0x20, 0x30, 0x10, 0x88, 0xDE,
+                       0x0D, 0x08, 0x0F, 0x0F, 0x01, 0x78, 0x33, 0x20, 0x10, 0x10, 0x80},
+     23, 0},
+    {0xC6, (uint8_t[]){0x05, 0x0A, 0x05, 0x0A, 0x00, 0xE0, 0x2E, 0x0B, 0x12, 0x22,
+                       0x12, 0x22, 0x01, 0x00, 0x00, 0x3F, 0x6A, 0x18, 0xC8, 0x22},
+     20, 0},
+    {0xC7, (uint8_t[]){0x50, 0x32, 0x28, 0x00, 0xa2, 0x80, 0x8f, 0x00, 0x80, 0xff,
+                       0x07, 0x11, 0x9F, 0x6f, 0xff, 0x26, 0x0c, 0x0d, 0x0e, 0x0f},
+     20, 0},
     {0xC9, (uint8_t[]){0x33, 0x44, 0x44, 0x01}, 4, 0},
-    {0xCF, (uint8_t[]){0x34, 0x1E, 0x88, 0x58, 0x13, 0x18, 0x56, 0x18, 0x1E, 0x68, 0xF7, 0x00, 0x65, 0x0C,
-                       0x22, 0xC4, 0x0C, 0x77, 0x22, 0x44, 0xAA, 0x55, 0x04, 0x04, 0x12, 0xA0, 0x08},
+    {0xCF,
+     (uint8_t[]){0x34, 0x1E, 0x88, 0x58, 0x13, 0x18, 0x56, 0x18, 0x1E, 0x68, 0xF7, 0x00, 0x65, 0x0C,
+                 0x22, 0xC4, 0x0C, 0x77, 0x22, 0x44, 0xAA, 0x55, 0x04, 0x04, 0x12, 0xA0, 0x08},
      27, 0},
-    {0xD5, (uint8_t[]){0x3E, 0x3E, 0x88, 0x00, 0x44, 0x04, 0x78, 0x33, 0x20, 0x78, 0x33, 0x20, 0x04, 0x28, 0xD3,
-                       0x47, 0x03, 0x03, 0x03, 0x03, 0x86, 0x00, 0x00, 0x00, 0x30, 0x52, 0x3f, 0x40, 0x40, 0x96},
+    {0xD5, (uint8_t[]){0x3E, 0x3E, 0x88, 0x00, 0x44, 0x04, 0x78, 0x33, 0x20, 0x78,
+                       0x33, 0x20, 0x04, 0x28, 0xD3, 0x47, 0x03, 0x03, 0x03, 0x03,
+                       0x86, 0x00, 0x00, 0x00, 0x30, 0x52, 0x3f, 0x40, 0x40, 0x96},
      30, 0},
-    {0xD6, (uint8_t[]){0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE, 0x95, 0x00, 0x01, 0x83, 0x75, 0x36, 0x20,
-                       0x75, 0x36, 0x20, 0x3F, 0x03, 0x03, 0x03, 0x10, 0x10, 0x00, 0x04, 0x51, 0x20, 0x01, 0x00},
+    {0xD6, (uint8_t[]){0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE, 0x95, 0x00,
+                       0x01, 0x83, 0x75, 0x36, 0x20, 0x75, 0x36, 0x20, 0x3F, 0x03,
+                       0x03, 0x03, 0x10, 0x10, 0x00, 0x04, 0x51, 0x20, 0x01, 0x00},
      30, 0},
-    {0xD7, (uint8_t[]){0x0a, 0x08, 0x0e, 0x0c, 0x1E, 0x18, 0x19, 0x1F, 0x00, 0x1F, 0x1A, 0x1F, 0x3E, 0x3E, 0x04, 0x00, 0x1F, 0x1F, 0x1F}, 19, 0},
-    {0xD8, (uint8_t[]){0x0B, 0x09, 0x0F, 0x0D, 0x1E, 0x18, 0x19, 0x1F, 0x01, 0x1F, 0x1A, 0x1F}, 12, 0},
-    {0xD9, (uint8_t[]){0x00, 0x0D, 0x0F, 0x09, 0x0B, 0x1F, 0x18, 0x19, 0x1F, 0x01, 0x1E, 0x1A, 0x1F}, 13, 0},
-    {0xDD, (uint8_t[]){0x0C, 0x0E, 0x08, 0x0A, 0x1F, 0x18, 0x19, 0x1F, 0x00, 0x1E, 0x1A, 0x1F}, 12, 0},
+    {0xD7,
+     (uint8_t[]){0x0a, 0x08, 0x0e, 0x0c, 0x1E, 0x18, 0x19, 0x1F, 0x00, 0x1F, 0x1A, 0x1F, 0x3E, 0x3E,
+                 0x04, 0x00, 0x1F, 0x1F, 0x1F},
+     19, 0},
+    {0xD8, (uint8_t[]){0x0B, 0x09, 0x0F, 0x0D, 0x1E, 0x18, 0x19, 0x1F, 0x01, 0x1F, 0x1A, 0x1F}, 12,
+     0},
+    {0xD9,
+     (uint8_t[]){0x00, 0x0D, 0x0F, 0x09, 0x0B, 0x1F, 0x18, 0x19, 0x1F, 0x01, 0x1E, 0x1A, 0x1F}, 13,
+     0},
+    {0xDD, (uint8_t[]){0x0C, 0x0E, 0x08, 0x0A, 0x1F, 0x18, 0x19, 0x1F, 0x00, 0x1E, 0x1A, 0x1F}, 12,
+     0},
     {0xDF, (uint8_t[]){0x44, 0x73, 0x4B, 0x69, 0x00, 0x0A, 0x02, 0x90}, 8, 0},
-    {0xE0, (uint8_t[]){0x19, 0x20, 0x0A, 0x13, 0x0E, 0x09, 0x12, 0x28, 0xD4, 0x24, 0x0C, 0x35, 0x13, 0x31, 0x36, 0x2f, 0x03}, 17, 0},
-    {0xE1, (uint8_t[]){0x38, 0x20, 0x09, 0x12, 0x0E, 0x08, 0x12, 0x28, 0xC5, 0x24, 0x0C, 0x34, 0x12, 0x31, 0x36, 0x2f, 0x27}, 17, 0},
-    {0xE2, (uint8_t[]){0x19, 0x20, 0x0A, 0x11, 0x09, 0x06, 0x11, 0x25, 0xD4, 0x22, 0x0B, 0x33, 0x12, 0x2D, 0x32, 0x2f, 0x03}, 17, 0},
-    {0xE3, (uint8_t[]){0x38, 0x20, 0x0A, 0x11, 0x09, 0x06, 0x11, 0x25, 0xC4, 0x21, 0x0A, 0x32, 0x11, 0x2C, 0x32, 0x2f, 0x27}, 17, 0},
-    {0xE4, (uint8_t[]){0x19, 0x20, 0x0D, 0x14, 0x0D, 0x08, 0x12, 0x2A, 0xD4, 0x26, 0x0E, 0x35, 0x13, 0x34, 0x39, 0x2f, 0x03}, 17, 0},
-    {0xE5, (uint8_t[]){0x38, 0x20, 0x0D, 0x13, 0x0D, 0x07, 0x12, 0x29, 0xC4, 0x25, 0x0D, 0x35, 0x12, 0x33, 0x39, 0x2f, 0x27}, 17, 0},
+    {0xE0,
+     (uint8_t[]){0x19, 0x20, 0x0A, 0x13, 0x0E, 0x09, 0x12, 0x28, 0xD4, 0x24, 0x0C, 0x35, 0x13, 0x31,
+                 0x36, 0x2f, 0x03},
+     17, 0},
+    {0xE1,
+     (uint8_t[]){0x38, 0x20, 0x09, 0x12, 0x0E, 0x08, 0x12, 0x28, 0xC5, 0x24, 0x0C, 0x34, 0x12, 0x31,
+                 0x36, 0x2f, 0x27},
+     17, 0},
+    {0xE2,
+     (uint8_t[]){0x19, 0x20, 0x0A, 0x11, 0x09, 0x06, 0x11, 0x25, 0xD4, 0x22, 0x0B, 0x33, 0x12, 0x2D,
+                 0x32, 0x2f, 0x03},
+     17, 0},
+    {0xE3,
+     (uint8_t[]){0x38, 0x20, 0x0A, 0x11, 0x09, 0x06, 0x11, 0x25, 0xC4, 0x21, 0x0A, 0x32, 0x11, 0x2C,
+                 0x32, 0x2f, 0x27},
+     17, 0},
+    {0xE4,
+     (uint8_t[]){0x19, 0x20, 0x0D, 0x14, 0x0D, 0x08, 0x12, 0x2A, 0xD4, 0x26, 0x0E, 0x35, 0x13, 0x34,
+                 0x39, 0x2f, 0x03},
+     17, 0},
+    {0xE5,
+     (uint8_t[]){0x38, 0x20, 0x0D, 0x13, 0x0D, 0x07, 0x12, 0x29, 0xC4, 0x25, 0x0D, 0x35, 0x12, 0x33,
+                 0x39, 0x2f, 0x27},
+     17, 0},
     {0xBB, (uint8_t[]){0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, 8, 0},
     {0x13, (uint8_t[]){0x00}, 0, 0},
     {0x11, (uint8_t[]){0x00}, 0, 200},
@@ -298,7 +351,9 @@ static esp_err_t panel_axs_init(esp_lcd_panel_t *panel) {
                      "external initialization sequence",
                      init_cmds[i].cmd);
         }
-        ESP_RETURN_ON_ERROR(tx_param(axs, io, init_cmds[i].cmd, init_cmds[i].data, init_cmds[i].data_bytes), TAG, "send command failed");
+        ESP_RETURN_ON_ERROR(
+            tx_param(axs, io, init_cmds[i].cmd, init_cmds[i].data, init_cmds[i].data_bytes), TAG,
+            "send command failed");
         vTaskDelay(pdMS_TO_TICKS(init_cmds[i].delay_ms));
     }
     ESP_LOGI(TAG, "send init commands success");
@@ -306,9 +361,11 @@ static esp_err_t panel_axs_init(esp_lcd_panel_t *panel) {
     return ESP_OK;
 }
 
-static esp_err_t panel_axs_draw_bitmap(esp_lcd_panel_t *panel, int x_start, int y_start, int x_end, int y_end, const void *color_data) {
+static esp_err_t panel_axs_draw_bitmap(esp_lcd_panel_t *panel, int x_start, int y_start, int x_end,
+                                       int y_end, const void *color_data) {
     axs_panel_t *axs = __containerof(panel, axs_panel_t, base);
-    assert((x_start < x_end) && (y_start < y_end) && "start position must be smaller than end position");
+    assert((x_start < x_end) && (y_start < y_end) &&
+           "start position must be smaller than end position");
     esp_lcd_panel_io_handle_t io = axs->io;
 
     x_start += axs->x_gap;
@@ -410,7 +467,9 @@ static esp_err_t panel_axs_disp_off(esp_lcd_panel_t *panel, bool off) {
     return ESP_OK;
 }
 
-esp_err_t atomic_lcd_touch_new_i2c_axs(const esp_lcd_panel_io_handle_t io, const esp_lcd_touch_config_t *config, esp_lcd_touch_handle_t *tp) {
+esp_err_t atomic_lcd_touch_new_i2c_axs(const esp_lcd_panel_io_handle_t io,
+                                       const esp_lcd_touch_config_t *config,
+                                       esp_lcd_touch_handle_t *tp) {
     ESP_RETURN_ON_FALSE(io, ESP_ERR_INVALID_ARG, TAG, "Invalid io");
     ESP_RETURN_ON_FALSE(config, ESP_ERR_INVALID_ARG, TAG, "Invalid config");
     ESP_RETURN_ON_FALSE(tp, ESP_ERR_INVALID_ARG, TAG, "Invalid touch handle");
@@ -433,7 +492,9 @@ esp_err_t atomic_lcd_touch_new_i2c_axs(const esp_lcd_panel_io_handle_t io, const
 
     /* Prepare pin for touch interrupt */
     if (axs->config.int_gpio_num != GPIO_NUM_NC) {
-        const gpio_config_t int_gpio_config = {.mode = GPIO_MODE_INPUT, .intr_type = GPIO_INTR_NEGEDGE, .pin_bit_mask = BIT64(axs->config.int_gpio_num)};
+        const gpio_config_t int_gpio_config = {.mode = GPIO_MODE_INPUT,
+                                               .intr_type = GPIO_INTR_NEGEDGE,
+                                               .pin_bit_mask = BIT64(axs->config.int_gpio_num)};
         ESP_GOTO_ON_ERROR(gpio_config(&int_gpio_config), err, TAG, "GPIO intr config failed");
 
         /* Register interrupt callback */
@@ -443,7 +504,8 @@ esp_err_t atomic_lcd_touch_new_i2c_axs(const esp_lcd_panel_io_handle_t io, const
     }
     /* Prepare pin for touch controller reset */
     if (axs->config.rst_gpio_num != GPIO_NUM_NC) {
-        const gpio_config_t rst_gpio_config = {.mode = GPIO_MODE_OUTPUT, .pin_bit_mask = BIT64(axs->config.rst_gpio_num)};
+        const gpio_config_t rst_gpio_config = {.mode = GPIO_MODE_OUTPUT,
+                                               .pin_bit_mask = BIT64(axs->config.rst_gpio_num)};
         ESP_GOTO_ON_ERROR(gpio_config(&rst_gpio_config), err, TAG, "GPIO reset config failed");
     }
     /* Reset controller */
@@ -475,10 +537,20 @@ static esp_err_t touch_axs_read_data(esp_lcd_touch_handle_t tp) {
     touch_record_struct_t *p_touch_data = NULL;
 
     uint8_t data[AXS_MAX_TOUCH_NUMBER * 6 + 2] = {0}; /*1 Point:8;  2 Point: 14 */
-    const uint8_t read_cmd[11] = {0xb5, 0xab, 0xa5, 0x5a, 0x00, 0x00, (AXS_MAX_TOUCH_NUMBER * 6 + 2) >> 8, (AXS_MAX_TOUCH_NUMBER * 6 + 2) & 0xff,
-                                  0x00, 0x00, 0x00};
+    const uint8_t read_cmd[11] = {0xb5,
+                                  0xab,
+                                  0xa5,
+                                  0x5a,
+                                  0x00,
+                                  0x00,
+                                  (AXS_MAX_TOUCH_NUMBER * 6 + 2) >> 8,
+                                  (AXS_MAX_TOUCH_NUMBER * 6 + 2) & 0xff,
+                                  0x00,
+                                  0x00,
+                                  0x00};
 
-    ESP_RETURN_ON_ERROR(i2c_write_bytes(tp, -1, read_cmd, sizeof(read_cmd)), TAG, "I2C write failed");
+    ESP_RETURN_ON_ERROR(i2c_write_bytes(tp, -1, read_cmd, sizeof(read_cmd)), TAG,
+                        "I2C write failed");
     ESP_RETURN_ON_ERROR(i2c_read_bytes(tp, -1, data, sizeof(data)), TAG, "I2C read failed");
 
     p_touch_data = (touch_record_struct_t *)data;
@@ -496,7 +568,8 @@ static esp_err_t touch_axs_read_data(esp_lcd_touch_handle_t tp) {
     return ESP_OK;
 }
 
-static bool touch_axs_get_xy(esp_lcd_touch_handle_t tp, uint16_t *x, uint16_t *y, uint16_t *strength, uint8_t *point_num, uint8_t max_point_num) {
+static bool touch_axs_get_xy(esp_lcd_touch_handle_t tp, uint16_t *x, uint16_t *y,
+                             uint16_t *strength, uint8_t *point_num, uint8_t max_point_num) {
     portENTER_CRITICAL(&tp->data.lock);
     /* Count of points */
     *point_num = (tp->data.points > max_point_num ? max_point_num : tp->data.points);
@@ -531,9 +604,11 @@ static esp_err_t touch_axs_del(esp_lcd_touch_handle_t tp) {
 
 static esp_err_t touch_axs_reset(esp_lcd_touch_handle_t tp) {
     if (tp->config.rst_gpio_num != GPIO_NUM_NC) {
-        ESP_RETURN_ON_ERROR(gpio_set_level(tp->config.rst_gpio_num, tp->config.levels.reset), TAG, "GPIO set level failed");
+        ESP_RETURN_ON_ERROR(gpio_set_level(tp->config.rst_gpio_num, tp->config.levels.reset), TAG,
+                            "GPIO set level failed");
         vTaskDelay(pdMS_TO_TICKS(200));
-        ESP_RETURN_ON_ERROR(gpio_set_level(tp->config.rst_gpio_num, !tp->config.levels.reset), TAG, "GPIO set level failed");
+        ESP_RETURN_ON_ERROR(gpio_set_level(tp->config.rst_gpio_num, !tp->config.levels.reset), TAG,
+                            "GPIO set level failed");
         vTaskDelay(pdMS_TO_TICKS(200));
     }
 
@@ -546,7 +621,8 @@ static esp_err_t i2c_read_bytes(esp_lcd_touch_handle_t tp, int reg, uint8_t *dat
     return esp_lcd_panel_io_rx_param(tp->io, reg, data, len);
 }
 
-static esp_err_t i2c_write_bytes(esp_lcd_touch_handle_t tp, int reg, const uint8_t *data, uint8_t len) {
+static esp_err_t i2c_write_bytes(esp_lcd_touch_handle_t tp, int reg, const uint8_t *data,
+                                 uint8_t len) {
     ESP_RETURN_ON_FALSE(data, ESP_ERR_INVALID_ARG, TAG, "Invalid data");
 
     return esp_lcd_panel_io_tx_param(tp->io, reg, data, len);
@@ -568,7 +644,8 @@ uint32_t axs_rx_cmd_fmt(uint8_t cmd) {
     return qspi_cmd;
 }
 
-esp_err_t axs_tx_cmd(esp_lcd_panel_io_handle_t io, uint8_t cmd, const void *param, size_t param_size) {
+esp_err_t axs_tx_cmd(esp_lcd_panel_io_handle_t io, uint8_t cmd, const void *param,
+                     size_t param_size) {
     uint32_t qspi_tx_cmd = axs_tx_cmd_fmt(cmd);
     return io->tx_param(io, qspi_tx_cmd, param, param_size);
 }
@@ -647,9 +724,9 @@ esp_err_t axs_madctl_h_refresh(esp_lcd_panel_t *panel, bool setting) {
     return ESP_OK;
 }
 /*
-void axs_fill_rect_rgb565(esp_lcd_panel_t *panel, int x1, int y1, int x2, int y2, uint16_t color565) {
-    axs_panel_t *axs = __containerof(panel, axs_panel_t, base);
-    esp_lcd_panel_io_handle_t io = axs->io;
+void axs_fill_rect_rgb565(esp_lcd_panel_t *panel, int x1, int y1, int x2, int y2, uint16_t color565)
+{ axs_panel_t *axs = __containerof(panel, axs_panel_t, base); esp_lcd_panel_io_handle_t io =
+axs->io;
 
     uint8_t caset[4] = {(x1 >> 8) & 0xFF, x1 & 0xFF, ((x2 - 1) >> 8) & 0xFF, (x2 - 1) & 0xFF};
     tx_param(axs, io, LCD_CMD_CASET, caset, 4);
@@ -677,8 +754,8 @@ void axs_fill_rect_rgb565(esp_lcd_panel_t *panel, int x1, int y1, int x2, int y2
     }
 }
 
-void axs_fill_rect_rgb888_hw(esp_lcd_panel_t *panel, int x1, int y1, int x2, int y2, uint8_t r, uint8_t g, uint8_t b) {
-    axs_panel_t *axs = __containerof(panel, axs_panel_t, base);
+void axs_fill_rect_rgb888_hw(esp_lcd_panel_t *panel, int x1, int y1, int x2, int y2, uint8_t r,
+uint8_t g, uint8_t b) { axs_panel_t *axs = __containerof(panel, axs_panel_t, base);
     esp_lcd_panel_io_handle_t io = axs->io;
 
     // Columns (CASET)

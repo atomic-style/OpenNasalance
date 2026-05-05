@@ -1,7 +1,11 @@
-/*
- * SPDX-FileCopyrightText: 2025 Atomic Style, Inc.
- * SPDX-License-Identifier: Apache-2.0
- */
+// Copyright (C) 2026 Atomic Style, LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+
 /**
  * @file
  * @brief ESP LCD & Touch: AXS15231B
@@ -57,12 +61,13 @@ typedef struct {
  *
  */
 typedef struct {
-    const axs_lcd_init_cmd_t *init_cmds; /*!< Pointer to initialization commands array. Set to NULL if
-                                          * using default commands. The array should be declared as
-                                          * `static const` and positioned outside the function. Please
-                                          * refer to `vendor_specific_init_default` in source file.
-                                          */
-    uint16_t init_cmds_size;             /*<! Number of commands in above array */
+    const axs_lcd_init_cmd_t
+        *init_cmds;          /*!< Pointer to initialization commands array. Set to NULL if
+                              * using default commands. The array should be declared as
+                              * `static const` and positioned outside the function. Please
+                              * refer to `vendor_specific_init_default` in source file.
+                              */
+    uint16_t init_cmds_size; /*<! Number of commands in above array */
     struct {
         unsigned int use_qspi_interface : 1; /*<! Set to 1 if use QSPI interface,
                                                 default is SPI interface */
@@ -83,101 +88,103 @@ typedef struct {
  *          - ESP_ERR_NO_MEM        if out of memory
  *          - ESP_OK                on success
  */
-esp_err_t atomic_lcd_new_panel_axs(const esp_lcd_panel_io_handle_t io, const esp_lcd_panel_dev_config_t *panel_dev_config, esp_lcd_panel_handle_t *ret_panel);
+esp_err_t atomic_lcd_new_panel_axs(const esp_lcd_panel_io_handle_t io,
+                                   const esp_lcd_panel_dev_config_t *panel_dev_config,
+                                   esp_lcd_panel_handle_t *ret_panel);
 
 /**
  * @brief LCD panel bus configuration structure
  *
  */
-#define AXS_PANEL_BUS_I80_CONFIG(dc, wr, clk, d0, d1, d2, d3, d4, d5, d6, d7, b_w, max_trans_sz)                                                               \
-    {                                                                                                                                                          \
-        .dc_gpio_num = dc,                                                                                                                                     \
-        .wr_gpio_num = wr,                                                                                                                                     \
-        .clk_src = clk,                                                                                                                                        \
-        .data_gpio_nums =                                                                                                                                      \
-            {                                                                                                                                                  \
-                d0,                                                                                                                                            \
-                d1,                                                                                                                                            \
-                d2,                                                                                                                                            \
-                d3,                                                                                                                                            \
-                d4,                                                                                                                                            \
-                d5,                                                                                                                                            \
-                d6,                                                                                                                                            \
-                d7,                                                                                                                                            \
-            },                                                                                                                                                 \
-        .bus_width = b_w,                                                                                                                                      \
-        .max_transfer_bytes = max_trans_sz,                                                                                                                    \
+#define AXS_PANEL_BUS_I80_CONFIG(dc, wr, clk, d0, d1, d2, d3, d4, d5, d6, d7, b_w, max_trans_sz)   \
+    {                                                                                              \
+        .dc_gpio_num = dc,                                                                         \
+        .wr_gpio_num = wr,                                                                         \
+        .clk_src = clk,                                                                            \
+        .data_gpio_nums =                                                                          \
+            {                                                                                      \
+                d0,                                                                                \
+                d1,                                                                                \
+                d2,                                                                                \
+                d3,                                                                                \
+                d4,                                                                                \
+                d5,                                                                                \
+                d6,                                                                                \
+                d7,                                                                                \
+            },                                                                                     \
+        .bus_width = b_w,                                                                          \
+        .max_transfer_bytes = max_trans_sz,                                                        \
     }
 
-#define AXS_PANEL_BUS_SPI_CONFIG(sclk, mosi, max_trans_sz)                                                                                                     \
-    {                                                                                                                                                          \
-        .sclk_io_num = sclk,                                                                                                                                   \
-        .mosi_io_num = mosi,                                                                                                                                   \
-        .miso_io_num = -1,                                                                                                                                     \
-        .quadhd_io_num = -1,                                                                                                                                   \
-        .quadwp_io_num = -1,                                                                                                                                   \
-        .max_transfer_sz = max_trans_sz,                                                                                                                       \
+#define AXS_PANEL_BUS_SPI_CONFIG(sclk, mosi, max_trans_sz)                                         \
+    {                                                                                              \
+        .sclk_io_num = sclk,                                                                       \
+        .mosi_io_num = mosi,                                                                       \
+        .miso_io_num = -1,                                                                         \
+        .quadhd_io_num = -1,                                                                       \
+        .quadwp_io_num = -1,                                                                       \
+        .max_transfer_sz = max_trans_sz,                                                           \
     }
-#define AXS_PANEL_BUS_QSPI_CONFIG(sclk, d0, d1, d2, d3, max_trans_sz)                                                                                          \
-    {                                                                                                                                                          \
-        .sclk_io_num = sclk,                                                                                                                                   \
-        .data0_io_num = d0,                                                                                                                                    \
-        .data1_io_num = d1,                                                                                                                                    \
-        .data2_io_num = d2,                                                                                                                                    \
-        .data3_io_num = d3,                                                                                                                                    \
-        .max_transfer_sz = max_trans_sz,                                                                                                                       \
+#define AXS_PANEL_BUS_QSPI_CONFIG(sclk, d0, d1, d2, d3, max_trans_sz)                              \
+    {                                                                                              \
+        .sclk_io_num = sclk,                                                                       \
+        .data0_io_num = d0,                                                                        \
+        .data1_io_num = d1,                                                                        \
+        .data2_io_num = d2,                                                                        \
+        .data3_io_num = d3,                                                                        \
+        .max_transfer_sz = max_trans_sz,                                                           \
     }
 
 /**
  * @brief LCD panel IO configuration structure
  *
  */
-#define AXS_PANEL_IO_I80_CONFIG(cs, dc, cb, cb_ctx)                                                                                                            \
-    {                                                                                                                                                          \
-        .cs_gpio_num = cs,                                                                                                                                     \
-        .pclk_hz = 20 * 1000 * 1000,                                                                                                                           \
-        .on_color_trans_done = cb,                                                                                                                             \
-        .trans_queue_depth = 10,                                                                                                                               \
-        .user_ctx = cb_ctx,                                                                                                                                    \
-        .dc_levels =                                                                                                                                           \
-            {                                                                                                                                                  \
-                .dc_idle_level = 0,                                                                                                                            \
-                .dc_cmd_level = 0,                                                                                                                             \
-                .dc_dummy_level = 0,                                                                                                                           \
-                .dc_data_level = 1,                                                                                                                            \
-            },                                                                                                                                                 \
-        .lcd_cmd_bits = 8,                                                                                                                                     \
-        .lcd_param_bits = 8,                                                                                                                                   \
+#define AXS_PANEL_IO_I80_CONFIG(cs, dc, cb, cb_ctx)                                                \
+    {                                                                                              \
+        .cs_gpio_num = cs,                                                                         \
+        .pclk_hz = 20 * 1000 * 1000,                                                               \
+        .on_color_trans_done = cb,                                                                 \
+        .trans_queue_depth = 10,                                                                   \
+        .user_ctx = cb_ctx,                                                                        \
+        .dc_levels =                                                                               \
+            {                                                                                      \
+                .dc_idle_level = 0,                                                                \
+                .dc_cmd_level = 0,                                                                 \
+                .dc_dummy_level = 0,                                                               \
+                .dc_data_level = 1,                                                                \
+            },                                                                                     \
+        .lcd_cmd_bits = 8,                                                                         \
+        .lcd_param_bits = 8,                                                                       \
     }
 
-#define AXS_PANEL_IO_SPI_CONFIG(cs, dc, cb, cb_ctx)                                                                                                            \
-    {                                                                                                                                                          \
-        .cs_gpio_num = cs,                                                                                                                                     \
-        .dc_gpio_num = dc,                                                                                                                                     \
-        .spi_mode = 3,                                                                                                                                         \
-        .pclk_hz = 40 * 1000 * 1000,                                                                                                                           \
-        .trans_queue_depth = 10,                                                                                                                               \
-        .on_color_trans_done = cb,                                                                                                                             \
-        .user_ctx = cb_ctx,                                                                                                                                    \
-        .lcd_cmd_bits = 8,                                                                                                                                     \
-        .lcd_param_bits = 8,                                                                                                                                   \
+#define AXS_PANEL_IO_SPI_CONFIG(cs, dc, cb, cb_ctx)                                                \
+    {                                                                                              \
+        .cs_gpio_num = cs,                                                                         \
+        .dc_gpio_num = dc,                                                                         \
+        .spi_mode = 3,                                                                             \
+        .pclk_hz = 40 * 1000 * 1000,                                                               \
+        .trans_queue_depth = 10,                                                                   \
+        .on_color_trans_done = cb,                                                                 \
+        .user_ctx = cb_ctx,                                                                        \
+        .lcd_cmd_bits = 8,                                                                         \
+        .lcd_param_bits = 8,                                                                       \
     }
 
-#define AXS_PANEL_IO_QSPI_CONFIG(cs, cb, cb_ctx)                                                                                                               \
-    {                                                                                                                                                          \
-        .cs_gpio_num = cs,                                                                                                                                     \
-        .dc_gpio_num = -1,                                                                                                                                     \
-        .spi_mode = 3,                                                                                                                                         \
-        .pclk_hz = 40 * 1000 * 1000,                                                                                                                           \
-        .trans_queue_depth = 10,                                                                                                                               \
-        .on_color_trans_done = cb,                                                                                                                             \
-        .user_ctx = cb_ctx,                                                                                                                                    \
-        .lcd_cmd_bits = 32,                                                                                                                                    \
-        .lcd_param_bits = 8,                                                                                                                                   \
-        .flags =                                                                                                                                               \
-            {                                                                                                                                                  \
-                .quad_mode = true,                                                                                                                             \
-            },                                                                                                                                                 \
+#define AXS_PANEL_IO_QSPI_CONFIG(cs, cb, cb_ctx)                                                   \
+    {                                                                                              \
+        .cs_gpio_num = cs,                                                                         \
+        .dc_gpio_num = -1,                                                                         \
+        .spi_mode = 3,                                                                             \
+        .pclk_hz = 40 * 1000 * 1000,                                                               \
+        .trans_queue_depth = 10,                                                                   \
+        .on_color_trans_done = cb,                                                                 \
+        .user_ctx = cb_ctx,                                                                        \
+        .lcd_cmd_bits = 32,                                                                        \
+        .lcd_param_bits = 8,                                                                       \
+        .flags =                                                                                   \
+            {                                                                                      \
+                .quad_mode = true,                                                                 \
+            },                                                                                     \
     }
 
 /**
@@ -192,7 +199,9 @@ esp_err_t atomic_lcd_new_panel_axs(const esp_lcd_panel_io_handle_t io, const esp
  * @return
  *      - ESP_OK: on success
  */
-esp_err_t atomic_lcd_touch_new_i2c_axs(const esp_lcd_panel_io_handle_t io, const esp_lcd_touch_config_t *config, esp_lcd_touch_handle_t *tp);
+esp_err_t atomic_lcd_touch_new_i2c_axs(const esp_lcd_panel_io_handle_t io,
+                                       const esp_lcd_touch_config_t *config,
+                                       esp_lcd_touch_handle_t *tp);
 
 /**
  * @brief I2C address of the AXS15231B controller
@@ -205,29 +214,31 @@ esp_err_t atomic_lcd_touch_new_i2c_axs(const esp_lcd_panel_io_handle_t io, const
  *
  */
 
-#define ATOMIC_LCD_TOUCH_IO_I2C_AXS_CONFIG()                                                                                                                   \
-    {                                                                                                                                                          \
-        .dev_addr = ATOMIC_LCD_TOUCH_IO_I2C_AXS_ADDRESS, .control_phase_bytes = 1, .dc_bit_offset = 0, .lcd_cmd_bits = 8, .flags = {                           \
-            .disable_control_phase = 1,                                                                                                                        \
-        }                                                                                                                                                      \
+#define ATOMIC_LCD_TOUCH_IO_I2C_AXS_CONFIG()                                                       \
+    {                                                                                              \
+        .dev_addr = ATOMIC_LCD_TOUCH_IO_I2C_AXS_ADDRESS, .control_phase_bytes = 1,                 \
+        .dc_bit_offset = 0, .lcd_cmd_bits = 8, .flags = {                                          \
+            .disable_control_phase = 1,                                                            \
+        }                                                                                          \
     }
 
-#define ATOMIC_LCD_TOUCH_IO_I2C_AXS_CONFIG_EX(scl_speed_hz)                                                                                                    \
-    {                                                                                                                                                          \
-        .dev_addr = ATOMIC_LCD_TOUCH_IO_I2C_AXS_ADDRESS,                                                                                                       \
-        .control_phase_bytes = 1,                                                                                                                              \
-        .dc_bit_offset = 0,                                                                                                                                    \
-        .lcd_cmd_bits = 8,                                                                                                                                     \
-        .flags =                                                                                                                                               \
-            {                                                                                                                                                  \
-                .disable_control_phase = 1,                                                                                                                    \
-            },                                                                                                                                                 \
-        .scl_speed_hz = scl_speed_hz,                                                                                                                          \
+#define ATOMIC_LCD_TOUCH_IO_I2C_AXS_CONFIG_EX(scl_speed_hz)                                        \
+    {                                                                                              \
+        .dev_addr = ATOMIC_LCD_TOUCH_IO_I2C_AXS_ADDRESS,                                           \
+        .control_phase_bytes = 1,                                                                  \
+        .dc_bit_offset = 0,                                                                        \
+        .lcd_cmd_bits = 8,                                                                         \
+        .flags =                                                                                   \
+            {                                                                                      \
+                .disable_control_phase = 1,                                                        \
+            },                                                                                     \
+        .scl_speed_hz = scl_speed_hz,                                                              \
     }
 
 uint32_t axs_tx_cmd_fmt(uint8_t cmd);
 uint32_t axs_rx_cmd_fmt(uint8_t cmd);
-esp_err_t axs_tx_cmd(esp_lcd_panel_io_handle_t io, uint8_t cmd, const void *param, size_t param_size);
+esp_err_t axs_tx_cmd(esp_lcd_panel_io_handle_t io, uint8_t cmd, const void *param,
+                     size_t param_size);
 esp_err_t axs_rx_cmd(esp_lcd_panel_io_handle_t io, uint8_t cmd, void *param, size_t param_size);
 
 esp_err_t axs_test_invert(esp_lcd_panel_io_handle_t io, bool invert_color_data);
@@ -239,8 +250,9 @@ esp_err_t axs_madctl_transpose(esp_lcd_panel_t *panel, bool setting);
 esp_err_t axs_madctl_v_refresh(esp_lcd_panel_t *panel, bool setting);
 esp_err_t axs_madctl_h_refresh(esp_lcd_panel_t *panel, bool setting);
 
-// void axs_fill_rect_rgb565(esp_lcd_panel_t *panel, int x1, int y1, int x2, int y2, uint16_t color565);
-// void axs_fill_rect_rgb888_hw(esp_lcd_panel_t *panel, int x1, int y1, int x2, int y2, uint8_t r, uint8_t g, uint8_t b);
+// void axs_fill_rect_rgb565(esp_lcd_panel_t *panel, int x1, int y1, int x2, int y2, uint16_t
+// color565); void axs_fill_rect_rgb888_hw(esp_lcd_panel_t *panel, int x1, int y1, int x2, int y2,
+// uint8_t r, uint8_t g, uint8_t b);
 
 #ifdef __cplusplus
 }
