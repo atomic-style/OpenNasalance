@@ -28,7 +28,8 @@ static a_lcd_t *s_lcd;
 static SemaphoreHandle_t s_sem;
 
 static int (*a_lcd_fn(a_board_id_t id))(a_lcd_t *,
-                                        bool (*)(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event_data_t *, void *)) {
+                                        bool (*)(esp_lcd_panel_io_handle_t,
+                                                 esp_lcd_panel_io_event_data_t *, void *)) {
     switch (id) {
     case LCD_W5:
         return a_lcd_w5;
@@ -45,7 +46,8 @@ static int (*a_lcd_fn(a_board_id_t id))(a_lcd_t *,
     }
 }
 
-bool a_lcd_cb(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t *event_data, void *user_ctx) {
+bool a_lcd_cb(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t *event_data,
+              void *user_ctx) {
     BaseType_t hpw = pdFALSE;
     xSemaphoreGiveFromISR(s_sem, &hpw);
     return hpw == pdTRUE;

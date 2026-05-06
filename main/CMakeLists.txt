@@ -7,6 +7,7 @@ idf_component_register(
         "main.c"
     INCLUDE_DIRS
         "include"
+        "${CMAKE_SOURCE_DIR}/private"
     PRIV_REQUIRES
         atomic_nvs
         atomic_events
@@ -17,7 +18,10 @@ idf_component_register(
         atomic_lcd
         atomic_lvgl
         atomic_mic
+        atomic_net
         atomic_touch
         atomic_sd
         atomic_bme280
+        atomic_ui
+        atomic_http
 )

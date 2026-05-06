@@ -125,8 +125,8 @@ sign one of the following Contributor License Agreements:
 - [`CLA-ENTITY.md`](CLA-ENTITY.md) — for companies, universities, and other
   legal entities
 
-Both CLAs let you keep copyright on your work and bind Atomic Style, LLC to
-keep the Project available under GPL (or another FSF/OSI-approved license)
-in perpetuity. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the signing flow.
+Both CLAs let you keep copyright on your work and bind Atomic Style, LLC to keep the Project available under GPL (or another FSF/OSI-approved license) in perpetuity. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the signing flow.
+
+[![CLA assistant](https://cla-assistant.io/readme/badge/atomic-style/OpenNasalance)](https://cla-assistant.io/atomic-style/OpenNasalance) 
 
 ---

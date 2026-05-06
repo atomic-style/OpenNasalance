@@ -1,0 +1,6 @@
+dependencies:
+  idf:
+    version: '>=5.5'
+description: Atomic HTTP Component
+url: https://github.com/atomic-style/atomic_http
+version: 0.1.0

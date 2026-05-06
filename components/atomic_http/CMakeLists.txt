@@ -1,0 +1,15 @@
+idf_component_register(
+    SRCS
+        "src/atomic_http.c"
+    INCLUDE_DIRS
+        "include"
+    EMBED_FILES
+        "web/index.html"
+    REQUIRES
+        esp_http_server
+        esp_netif
+        esp_wifi
+        esp_timer
+        atomic_util
+        atomic_bits
+)

@@ -1,0 +1,13 @@
+idf_component_register(
+    SRCS
+        "src/atomic_ui.c"
+    INCLUDE_DIRS
+        "include"
+    EMBED_FILES
+        "assets/splash.jpg"
+    REQUIRES
+        atomic_util
+        atomic_bits
+        atomic_lvgl
+        lvgl__lvgl
+)

@@ -6,8 +6,6 @@
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
-
-
 #include "init.h"
 #include "init_display.h"
 #include "init_touch.h"
@@ -17,16 +15,28 @@
 #include "atomic_nvs.h"
 #include "atomic_err.h"
 #include "atomic_log.h"
+#include "atomic_ui.h"
 #include "config.h"
 #include "esp_err.h"
 #include "a_mic.h"
 #include "nasometer.h"
+
 #ifdef ENABLE_BME280
 #include "pressure.h"
 #endif
 
 #ifdef ENABLE_SD
 #include "atomic_sd.h"
+#endif
+
+#ifdef ENABLE_WIFI
+#include <string.h>
+#include "atomic_net.h"
+#include "wifi_credentials.h"
+#endif
+
+#ifdef ENABLE_HTTP
+#include "atomic_http.h"
 #endif
 
 static const char *TAG = "、";
@@ -51,6 +61,17 @@ static esp_err_t init_nvs(void) {
         try(init_nvs_defaults());
     return ESP_OK;
 }
+
+#ifdef ENABLE_WIFI
+static esp_err_t init_net(void) {
+    wifi_config_t cfg = {0};
+    strncpy((char *)cfg.sta.ssid, WIFI_SSID, sizeof(cfg.sta.ssid) - 1);
+    strncpy((char *)cfg.sta.password, WIFI_PASSWORD, sizeof(cfg.sta.password) - 1);
+    cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    a_bits_set(BIT_NTP_ENABLE); // a_net_task brings up NTP after wifi associates
+    return a_net_init(&cfg);
+}
+#endif
 
 #ifdef ENABLE_SD
 static esp_err_t init_sd(void) {
@@ -87,9 +108,22 @@ void init() {
     try(a_bits_init());
     try(a_evt_init());
 
+#ifdef ENABLE_DISPLAY
+    try(init_display());
+    try(atomic_ui());
+#endif // ENABLE_DISPLAY
+
+#ifdef ENABLE_TOUCH
+    try(init_touch());
+#endif // ENABLE_TOUCH
+
 #ifdef ENABLE_WIFI
-    // try(init_net());
+    try(init_net());
 #endif // ENABLE_WIFI
+
+#ifdef ENABLE_HTTP
+    try(a_http_init(DEV_UNIT));
+#endif // ENABLE_HTTP
 
 #ifdef ENABLE_SD
     // Mount SD before display so atomic_lvgl's task picks up BIT_SD_READY
@@ -99,22 +133,15 @@ void init() {
     }
 #endif // ENABLE_SD
 
-#ifdef ENABLE_DISPLAY
-    try(init_display());
-#endif // ENABLE_DISPLAY
-
-#ifdef ENABLE_TOUCH
-    try(init_touch());
-#endif // ENABLE_TOUCH
-
     try(a_evt_user_init());
 
 #ifdef ENABLE_BME280
     // Pressure-only mode: skip mic init and replace the nasometer UI with a
     // rolling BME280 trace. See ADDITION.md.
     try(pressure_init());
-#elif defined(ENABLE_MIC)
+#endif // ENABLE_BME280
 
+#ifdef ENABLE_MIC
     a_mic_441_config_t a_mic_441_config = {
         .pin_clk = PIN_MIC_CLK,
         .pin_ws = PIN_MIC_WS,
@@ -123,22 +150,9 @@ void init() {
         .sample_rate = MIC_SAMPLE_RATE,
     };
     try(a_mic_441_init(&a_mic_441_config));
-
-#ifdef ENABLE_LVGL
     try(nasometer_init());
-#endif // ENABLE_LVGL
+#endif // ENABLE_MIC
 
-    /*
-    a_mic_t5837_config_t t5837_cfg = {
-        .pin_clk = PIN_MIC_CLK,
-        .pin_data = PIN_MIC_DATA,
-        .sample_rate = MIC_SAMPLE_RATE,
-        .buf_samples = MIC_BUF_SAMPLES,
-    };
-    try(a_mic_t5837_init(&t5837_cfg));
-    */
-
-#endif // ENABLE_BME280 / ENABLE_MIC
-
+    try(a_ui_clear());
     info(TAG, "init() done.");
 }

@@ -108,8 +108,8 @@
 #define LV_USE_ASSERT_OBJ 0
 
 #define LV_ASSERT_HANDLER_INCLUDE <stdint.h>
-#define LV_ASSERT_HANDLER                                                                                              \
-    while (1)                                                                                                          \
+#define LV_ASSERT_HANDLER                                                                          \
+    while (1)                                                                                      \
         ;
 
 // Debug
@@ -280,7 +280,8 @@
 #define LV_USE_FS_POSIX 0
 #define LV_USE_FS_WIN32 0
 #define LV_USE_FS_FATFS 0
-#define LV_USE_FS_MEMFS 0
+#define LV_USE_FS_MEMFS 1
+#define LV_FS_MEMFS_LETTER 'C'
 #define LV_USE_FS_LITTLEFS 0
 #define LV_USE_FS_ARDUINO_ESP_LITTLEFS 0
 #define LV_USE_FS_ARDUINO_SD 0

@@ -27,6 +27,10 @@
 #include "freertos/task.h"
 #include "lvgl.h"
 
+#ifdef ENABLE_HTTP
+#include "atomic_http.h"
+#endif
+
 static const char *TAG = "㊣";
 
 #define N SPECTRO_FFT_SIZE
@@ -52,14 +56,14 @@ static const char *TAG = "㊣";
 #define SPECTRO_H 80
 #define SPECTRO_W DISPLAY_W
 
-#define RULE1_Y (TEXT_TOP_H)                                  // 18
-#define SPECTRO_A_Y (RULE1_Y + 1)                             // 19
-#define RULE2_Y (SPECTRO_A_Y + SPECTRO_H)                     // 99
-#define SPECTRO_B_Y (RULE2_Y + 1)                             // 100
-#define RULE3_Y (SPECTRO_B_Y + SPECTRO_H)                     // 180
-#define TEXT_BOT_Y (RULE3_Y + 1)                              // 181
-#define RULE4_Y (TEXT_BOT_Y + TEXT_BOT_H)                     // 200
-#define BUTTON_ROW_Y (RULE4_Y + 1)                            // 201
+#define RULE1_Y (TEXT_TOP_H)              // 18
+#define SPECTRO_A_Y (RULE1_Y + 1)         // 19
+#define RULE2_Y (SPECTRO_A_Y + SPECTRO_H) // 99
+#define SPECTRO_B_Y (RULE2_Y + 1)         // 100
+#define RULE3_Y (SPECTRO_B_Y + SPECTRO_H) // 180
+#define TEXT_BOT_Y (RULE3_Y + 1)          // 181
+#define RULE4_Y (TEXT_BOT_Y + TEXT_BOT_H) // 200
+#define BUTTON_ROW_Y (RULE4_Y + 1)        // 201
 
 #define BYTES_PER_PX 2 // RGB565
 
@@ -71,9 +75,7 @@ static const char *TAG = "㊣";
 static int s_nasal_lo_hz = NASALANCE_BAND_LOW_HZ;
 static int s_nasal_hi_hz = NASALANCE_BAND_HIGH_HZ;
 
-static inline int hz_to_bin(int hz) {
-    return (int)((int64_t)hz * N / MIC_SAMPLE_RATE);
-}
+static inline int hz_to_bin(int hz) { return (int)((int64_t)hz * N / MIC_SAMPLE_RATE); }
 
 // Rolling window size in FFT frames: (fs / hop) * seconds, +1 margin
 #define NASAL_FRAMES ((MIC_SAMPLE_RATE * NASALANCE_WINDOW_SEC) / HOP + 1)
@@ -94,18 +96,18 @@ static uint16_t *s_buf_bot = NULL;
 
 // LVGL screens
 static lv_obj_t *s_scr_main = NULL;
-static lv_obj_t *s_scr_opt  = NULL;
+static lv_obj_t *s_scr_opt = NULL;
 
 // Options-screen widgets
 static lv_obj_t *s_lbl_lo = NULL;
 static lv_obj_t *s_lbl_hi = NULL;
 static lv_obj_t *s_keypad = NULL;
-static lv_obj_t *s_opt_btn_ok     = NULL;
+static lv_obj_t *s_opt_btn_ok = NULL;
 static lv_obj_t *s_opt_btn_cancel = NULL;
-static lv_obj_t *s_opt_btn_reset  = NULL;
-static int       s_opt_lo_hz = 0;
-static int       s_opt_hi_hz = 0;
-static int       s_opt_focus = 0;  // 0 = lo, 1 = hi
+static lv_obj_t *s_opt_btn_reset = NULL;
+static int s_opt_lo_hz = 0;
+static int s_opt_hi_hz = 0;
+static int s_opt_focus = 0; // 0 = lo, 1 = hi
 
 typedef enum {
     REC_STOPPED = 0,
@@ -113,13 +115,13 @@ typedef enum {
 } rec_state_t;
 
 static volatile rec_state_t s_rec_state = REC_STOPPED;
-static int64_t s_run_start_us = 0;   // esp_timer_get_time() at last Start
-static double  s_run_elapsed_us = 0; // accumulated time across Start/Stop cycles
+static int64_t s_run_start_us = 0;  // esp_timer_get_time() at last Start
+static double s_run_elapsed_us = 0; // accumulated time across Start/Stop cycles
 
 // FFT working set
-static float    s_window[N];
-static float    s_tw_cos[N / 2];
-static float    s_tw_sin[N / 2];
+static float s_window[N];
+static float s_tw_cos[N / 2];
+static float s_tw_sin[N / 2];
 static uint16_t s_bitrev[N];
 
 // Colormap 256 -> RGB565
@@ -128,22 +130,22 @@ static uint16_t s_colormap[256];
 // Amplitude trace state (per-canvas previous y so we can draw a vertical
 // segment connecting consecutive frames, avoiding gaps when y jumps).
 #define AMP_TRACE_DB_FLOOR (-60.0f)
-#define AMP_TRACE_DB_CEIL   (0.0f)
+#define AMP_TRACE_DB_CEIL (0.0f)
 static int s_amp_y_top_prev = SPECTRO_H - 1;
 static int s_amp_y_bot_prev = SPECTRO_H - 1;
 
 // View mode toggled by the S/A/B buttons in the top-left.
 typedef enum {
-    VIEW_SPECTRO   = 0,  // spectrogram only
-    VIEW_AMPLITUDE = 1,  // filled amplitude only
-    VIEW_BOTH      = 2,  // spectrogram + amplitude line
+    VIEW_SPECTRO = 0,   // spectrogram only
+    VIEW_AMPLITUDE = 1, // filled amplitude only
+    VIEW_BOTH = 2,      // spectrogram + amplitude line
 } view_mode_t;
 static volatile view_mode_t s_view_mode = VIEW_BOTH;
 
 // Rolling nasalance buffers
-static float  s_nasal_ring[NASAL_FRAMES];
-static float  s_oral_ring[NASAL_FRAMES];
-static int    s_ring_head = 0;
+static float s_nasal_ring[NASAL_FRAMES];
+static float s_oral_ring[NASAL_FRAMES];
+static int s_ring_head = 0;
 static double s_nasal_sum = 0.0;
 static double s_oral_sum = 0.0;
 
@@ -156,19 +158,16 @@ static inline uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
 // 5-stop gradient: black → deep blue → magenta → orange → yellow
 static void colormap_init(void) {
     const float stops[6][3] = {
-        {0.00f, 0.00f, 0.00f},
-        {0.12f, 0.00f, 0.38f},
-        {0.50f, 0.00f, 0.50f},
-        {0.90f, 0.30f, 0.10f},
-        {1.00f, 0.85f, 0.25f},
-        {1.00f, 1.00f, 0.85f},
+        {0.00f, 0.00f, 0.00f}, {0.12f, 0.00f, 0.38f}, {0.50f, 0.00f, 0.50f},
+        {0.90f, 0.30f, 0.10f}, {1.00f, 0.85f, 0.25f}, {1.00f, 1.00f, 0.85f},
     };
     const int nstops = 6;
     for (int i = 0; i < 256; i++) {
         float t = (float)i / 255.0f;
         float pos = t * (nstops - 1);
         int a = (int)pos;
-        if (a >= nstops - 1) a = nstops - 2;
+        if (a >= nstops - 1)
+            a = nstops - 2;
         float f = pos - a;
         float r = stops[a][0] + f * (stops[a + 1][0] - stops[a][0]);
         float g = stops[a][1] + f * (stops[a + 1][1] - stops[a][1]);
@@ -185,7 +184,10 @@ static void window_init(void) {
 
 static int ilog2_i(int v) {
     int r = 0;
-    while (v > 1) { v >>= 1; r++; }
+    while (v > 1) {
+        v >>= 1;
+        r++;
+    }
     return r;
 }
 
@@ -216,8 +218,10 @@ static void fft_forward(float *re, float *im) {
         int j = s_bitrev[i];
         if (j > i) {
             float tr = re[i], ti = im[i];
-            re[i] = re[j]; im[i] = im[j];
-            re[j] = tr;    im[j] = ti;
+            re[i] = re[j];
+            im[i] = im[j];
+            re[j] = tr;
+            im[j] = ti;
         }
     }
     for (int size = 2; size <= N; size <<= 1) {
@@ -231,8 +235,8 @@ static void fft_forward(float *re, float *im) {
                 float b_re = re[i + j + half], b_im = im[i + j + half];
                 float t_re = b_re * cr - b_im * ci;
                 float t_im = b_re * ci + b_im * cr;
-                re[i + j]        = a_re + t_re;
-                im[i + j]        = a_im + t_im;
+                re[i + j] = a_re + t_re;
+                im[i + j] = a_im + t_im;
                 re[i + j + half] = a_re - t_re;
                 im[i + j + half] = a_im - t_im;
                 twi += step;
@@ -240,6 +244,34 @@ static void fft_forward(float *re, float *im) {
         }
     }
 }
+
+#ifdef ENABLE_HTTP
+// Map FFT bins MIN_BIN..MAX_BIN inclusive to 0-255 dB-scaled values, using the
+// same dB floor/ceiling the LCD spectrogram uses. Output length is BINS_OUT.
+#define BINS_OUT (MAX_BIN - MIN_BIN + 1)
+static void bins_to_dbu8(const float *re, const float *im, uint8_t *out) {
+    const float db_floor = (float)SPECTRO_DB_FLOOR;
+    const float db_range = (float)(SPECTRO_DB_CEIL - SPECTRO_DB_FLOOR);
+    const float ref_db = 20.0f * log10f((float)N / 2.0f);
+    for (int b = 0; b < BINS_OUT; b++) {
+        int bin = MIN_BIN + b;
+        float r = re[bin], i = im[bin];
+        float mag2 = r * r + i * i;
+        float db = (mag2 > 1e-20f) ? 10.0f * log10f(mag2) - ref_db : -200.0f;
+        float t = (db - db_floor) / db_range;
+        if (t < 0.0f) t = 0.0f;
+        if (t > 1.0f) t = 1.0f;
+        out[b] = (uint8_t)(t * 255.0f);
+    }
+}
+
+static uint8_t amp_db_to_u8(float db) {
+    float t = (db - AMP_TRACE_DB_FLOOR) / (AMP_TRACE_DB_CEIL - AMP_TRACE_DB_FLOOR);
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+    return (uint8_t)(t * 255.0f);
+}
+#endif // ENABLE_HTTP
 
 // Scroll one canvas left by 1 column, write magnitude column at x = SPECTRO_W-1.
 static void render_column(uint16_t *buf, const float *re, const float *im) {
@@ -256,16 +288,20 @@ static void render_column(uint16_t *buf, const float *re, const float *im) {
     for (int y = 0; y < SPECTRO_H; y++) {
         float fpos = (float)(SPECTRO_H - 1 - y) / (float)(SPECTRO_H - 1);
         int bin = MIN_BIN + (int)(fpos * bin_span + 0.5f);
-        if (bin < 1) bin = 1;
-        if (bin >= N / 2) bin = N / 2 - 1;
+        if (bin < 1)
+            bin = 1;
+        if (bin >= N / 2)
+            bin = N / 2 - 1;
 
         float r = re[bin], i = im[bin];
         float mag2 = r * r + i * i;
-        float db = (mag2 > 1e-20f) ? 10.0f * log10f(mag2) - 20.0f * log10f((float)N / 2.0f)
-                                    : -200.0f;
+        float db =
+            (mag2 > 1e-20f) ? 10.0f * log10f(mag2) - 20.0f * log10f((float)N / 2.0f) : -200.0f;
         float t = (db - db_floor) / db_range;
-        if (t < 0.0f) t = 0.0f;
-        if (t > 1.0f) t = 1.0f;
+        if (t < 0.0f)
+            t = 0.0f;
+        if (t > 1.0f)
+            t = 1.0f;
         int idx = (int)(t * 255.0f);
         buf[y * SPECTRO_W + x] = s_colormap[idx];
     }
@@ -273,11 +309,15 @@ static void render_column(uint16_t *buf, const float *re, const float *im) {
 
 static int amp_db_to_y(float db) {
     float t = (db - AMP_TRACE_DB_FLOOR) / (AMP_TRACE_DB_CEIL - AMP_TRACE_DB_FLOOR);
-    if (t < 0.0f) t = 0.0f;
-    if (t > 1.0f) t = 1.0f;
+    if (t < 0.0f)
+        t = 0.0f;
+    if (t > 1.0f)
+        t = 1.0f;
     int y = SPECTRO_H - 1 - (int)(t * (SPECTRO_H - 1));
-    if (y < 0) y = 0;
-    if (y >= SPECTRO_H) y = SPECTRO_H - 1;
+    if (y < 0)
+        y = 0;
+    if (y >= SPECTRO_H)
+        y = SPECTRO_H - 1;
     return y;
 }
 
@@ -287,9 +327,15 @@ static int amp_db_to_y(float db) {
 static void render_amp_trace(uint16_t *buf, int *prev_y, int new_y, uint16_t color) {
     const int x = SPECTRO_W - 1;
     int y0 = *prev_y, y1 = new_y;
-    if (y0 > y1) { int t = y0; y0 = y1; y1 = t; }
-    if (y0 < 0) y0 = 0;
-    if (y1 >= SPECTRO_H) y1 = SPECTRO_H - 1;
+    if (y0 > y1) {
+        int t = y0;
+        y0 = y1;
+        y1 = t;
+    }
+    if (y0 < 0)
+        y0 = 0;
+    if (y1 >= SPECTRO_H)
+        y1 = SPECTRO_H - 1;
     for (int y = y0; y <= y1; y++) {
         buf[y * SPECTRO_W + x] = color;
     }
@@ -304,8 +350,10 @@ static void render_filled_column(uint16_t *buf, int amp_y, uint16_t color) {
         memmove(row, row + 1, (SPECTRO_W - 1) * sizeof(uint16_t));
     }
     const int x = SPECTRO_W - 1;
-    if (amp_y < 0) amp_y = 0;
-    if (amp_y >= SPECTRO_H) amp_y = SPECTRO_H - 1;
+    if (amp_y < 0)
+        amp_y = 0;
+    if (amp_y >= SPECTRO_H)
+        amp_y = SPECTRO_H - 1;
     for (int y = 0; y < amp_y; y++) {
         buf[y * SPECTRO_W + x] = 0x0000;
     }
@@ -318,8 +366,10 @@ static void render_filled_column(uint16_t *buf, int amp_y, uint16_t color) {
 static float band_energy(const float *re, const float *im) {
     float acc = 0.0f;
     int lo = hz_to_bin(s_nasal_lo_hz), hi = hz_to_bin(s_nasal_hi_hz);
-    if (lo < 1) lo = 1;
-    if (hi >= N / 2) hi = N / 2 - 1;
+    if (lo < 1)
+        lo = 1;
+    if (hi >= N / 2)
+        hi = N / 2 - 1;
     for (int k = lo; k <= hi; k++) {
         acc += re[k] * re[k] + im[k] * im[k];
     }
@@ -328,9 +378,9 @@ static float band_energy(const float *re, const float *im) {
 
 static void push_nasalance(float nasal, float oral) {
     s_nasal_sum += nasal - s_nasal_ring[s_ring_head];
-    s_oral_sum  += oral  - s_oral_ring[s_ring_head];
+    s_oral_sum += oral - s_oral_ring[s_ring_head];
     s_nasal_ring[s_ring_head] = nasal;
-    s_oral_ring[s_ring_head]  = oral;
+    s_oral_ring[s_ring_head] = oral;
     s_ring_head = (s_ring_head + 1) % NASAL_FRAMES;
 }
 
@@ -357,8 +407,10 @@ static double elapsed_seconds(void) {
 
 static void nvs_load_options(void) {
     uint32_t v;
-    if (a_nvs_get_u32(NVS_KEY_NASAL_LO, &v) == ESP_OK) s_nasal_lo_hz = (int)v;
-    if (a_nvs_get_u32(NVS_KEY_NASAL_HI, &v) == ESP_OK) s_nasal_hi_hz = (int)v;
+    if (a_nvs_get_u32(NVS_KEY_NASAL_LO, &v) == ESP_OK)
+        s_nasal_lo_hz = (int)v;
+    if (a_nvs_get_u32(NVS_KEY_NASAL_HI, &v) == ESP_OK)
+        s_nasal_hi_hz = (int)v;
     notice(TAG, "options loaded: %dHz..%dHz", s_nasal_lo_hz, s_nasal_hi_hz);
 }
 
@@ -377,10 +429,10 @@ static void nvs_save_options(void) {
 
 #define WAV_DIR "/sd"
 
-static FILE   *s_wav_a = NULL;
-static FILE   *s_wav_b = NULL;
+static FILE *s_wav_a = NULL;
+static FILE *s_wav_b = NULL;
 static uint32_t s_wav_samples = 0;
-static volatile bool s_wav_request_open  = false;
+static volatile bool s_wav_request_open = false;
 static volatile bool s_wav_request_close = false;
 
 static void wav_put_u32_le(uint8_t *p, uint32_t v) {
@@ -396,20 +448,20 @@ static void wav_put_u16_le(uint8_t *p, uint16_t v) {
 }
 
 static void wav_write_header(FILE *f, uint32_t total_samples) {
-    uint8_t  hdr[44];
+    uint8_t hdr[44];
     uint32_t data_bytes = total_samples * 2; // 16-bit mono
-    uint32_t riff_size  = 36 + data_bytes;
+    uint32_t riff_size = 36 + data_bytes;
     uint32_t sample_rate = MIC_SAMPLE_RATE;
     uint16_t num_ch = 1, bits = 16;
     uint32_t byte_rate = sample_rate * num_ch * (bits / 8);
     uint16_t block_align = num_ch * (bits / 8);
 
-    memcpy(hdr +  0, "RIFF", 4);
-    wav_put_u32_le(hdr +  4, riff_size);
-    memcpy(hdr +  8, "WAVE", 4);
+    memcpy(hdr + 0, "RIFF", 4);
+    wav_put_u32_le(hdr + 4, riff_size);
+    memcpy(hdr + 8, "WAVE", 4);
     memcpy(hdr + 12, "fmt ", 4);
-    wav_put_u32_le(hdr + 16, 16);   // fmt chunk size
-    wav_put_u16_le(hdr + 20, 1);    // PCM
+    wav_put_u32_le(hdr + 16, 16); // fmt chunk size
+    wav_put_u16_le(hdr + 20, 1);  // PCM
     wav_put_u16_le(hdr + 22, num_ch);
     wav_put_u32_le(hdr + 24, sample_rate);
     wav_put_u32_le(hdr + 28, byte_rate);
@@ -424,13 +476,16 @@ static void wav_write_header(FILE *f, uint32_t total_samples) {
 
 static int wav_next_sequence(void) {
     DIR *d = opendir(WAV_DIR);
-    if (!d) return 1;
+    if (!d)
+        return 1;
     int max_n = 0;
     struct dirent *de;
     while ((de = readdir(d)) != NULL) {
-        if (strncmp(de->d_name, "Nas_", 4) != 0) continue;
+        if (strncmp(de->d_name, "Nas_", 4) != 0)
+            continue;
         int n = atoi(de->d_name + 4);
-        if (n > max_n) max_n = n;
+        if (n > max_n)
+            max_n = n;
     }
     closedir(d);
     return max_n + 1;
@@ -449,8 +504,14 @@ static void wav_open_pair(void) {
     s_wav_b = fopen(path_b, "wb");
     if (!s_wav_a || !s_wav_b) {
         warn(TAG, "WAV: fopen failed (seq %d)", seq);
-        if (s_wav_a) { fclose(s_wav_a); s_wav_a = NULL; }
-        if (s_wav_b) { fclose(s_wav_b); s_wav_b = NULL; }
+        if (s_wav_a) {
+            fclose(s_wav_a);
+            s_wav_a = NULL;
+        }
+        if (s_wav_b) {
+            fclose(s_wav_b);
+            s_wav_b = NULL;
+        }
         return;
     }
     // Reserve a blank 44-byte header; patched on close.
@@ -476,20 +537,26 @@ static void wav_close_pair(void) {
 }
 
 static void wav_write_frames(const int32_t *s1, const int32_t *s2, size_t n) {
-    if (!s_wav_a || !s_wav_b) return;
+    if (!s_wav_a || !s_wav_b)
+        return;
     int16_t buf_a[128];
     int16_t buf_b[128];
     size_t i = 0;
     while (i < n) {
         size_t chunk = n - i;
-        if (chunk > 128) chunk = 128;
+        if (chunk > 128)
+            chunk = 128;
         for (size_t k = 0; k < chunk; k++) {
             int32_t v1 = s1[i + k] >> 16;
             int32_t v2 = s2[i + k] >> 16;
-            if (v1 >  32767) v1 =  32767;
-            if (v1 < -32768) v1 = -32768;
-            if (v2 >  32767) v2 =  32767;
-            if (v2 < -32768) v2 = -32768;
+            if (v1 > 32767)
+                v1 = 32767;
+            if (v1 < -32768)
+                v1 = -32768;
+            if (v2 > 32767)
+                v2 = 32767;
+            if (v2 < -32768)
+                v2 = -32768;
             buf_a[k] = (int16_t)v1;
             buf_b[k] = (int16_t)v2;
         }
@@ -503,18 +570,19 @@ static void wav_write_frames(const int32_t *s1, const int32_t *s2, size_t n) {
 // Bright colors mean "this action is available"; dim means "current state,
 // or n/a". We also tint the Stop button when recording so it reads as the
 // primary action.
-#define COL_START_ON  lv_color_make(0x1e, 0x9e, 0x1e)
+#define COL_START_ON lv_color_make(0x1e, 0x9e, 0x1e)
 #define COL_START_OFF lv_color_make(0x0e, 0x3d, 0x0e)
-#define COL_STOP_ON   lv_color_make(0x9e, 0x1e, 0x1e)
-#define COL_STOP_OFF  lv_color_make(0x3d, 0x0e, 0x0e)
-#define COL_RESET     lv_color_make(0x4a, 0x4a, 0x4a)
+#define COL_STOP_ON lv_color_make(0x9e, 0x1e, 0x1e)
+#define COL_STOP_OFF lv_color_make(0x3d, 0x0e, 0x0e)
+#define COL_RESET lv_color_make(0x4a, 0x4a, 0x4a)
 
 static void refresh_status_label(int nasalance, double t_sec) {
-    if (!s_lbl_bot) return;
+    if (!s_lbl_bot)
+        return;
     int t_tenths = (int)(t_sec * 10.0 + 0.5);
     const char *status = (s_rec_state == REC_RUNNING) ? "Recording" : "Stopped";
-    lv_label_set_text_fmt(s_lbl_bot, "Nasalance: %2d   Time: %3d.%d   [%s]",
-                           nasalance, t_tenths / 10, t_tenths % 10, status);
+    lv_label_set_text_fmt(s_lbl_bot, "Nasalance: %2d   Time: %3d.%d   [%s]", nasalance,
+                          t_tenths / 10, t_tenths % 10, status);
 }
 
 static void refresh_button_styles(void) {
@@ -529,7 +597,8 @@ static void refresh_button_styles(void) {
 
 static void btn_start_cb(lv_event_t *e) {
     (void)e;
-    if (s_rec_state == REC_RUNNING) return;
+    if (s_rec_state == REC_RUNNING)
+        return;
     s_run_start_us = esp_timer_get_time();
     s_rec_state = REC_RUNNING;
     s_wav_request_open = true;
@@ -539,7 +608,8 @@ static void btn_start_cb(lv_event_t *e) {
 
 static void btn_stop_cb(lv_event_t *e) {
     (void)e;
-    if (s_rec_state == REC_STOPPED) return;
+    if (s_rec_state == REC_STOPPED)
+        return;
     s_run_elapsed_us += (double)(esp_timer_get_time() - s_run_start_us);
     s_rec_state = REC_STOPPED;
     s_wav_request_close = true;
@@ -547,17 +617,17 @@ static void btn_stop_cb(lv_event_t *e) {
     double denom = s_nasal_sum + s_oral_sum;
     int nasalance = (denom > 1e-12) ? (int)(100.0 * s_nasal_sum / denom + 0.5) : 0;
     refresh_status_label(nasalance, s_run_elapsed_us / 1e6);
-    notice(TAG, "Stop pressed  elapsed=%.1fs  nasalance=%d",
-           s_run_elapsed_us / 1e6, nasalance);
+    notice(TAG, "Stop pressed  elapsed=%.1fs  nasalance=%d", s_run_elapsed_us / 1e6, nasalance);
 }
 
 static void refresh_mode_button_styles(void) {
-    lv_obj_t *btns[3]      = { s_btn_mode_s, s_btn_mode_a, s_btn_mode_b };
-    view_mode_t modes[3]   = { VIEW_SPECTRO, VIEW_AMPLITUDE, VIEW_BOTH };
-    lv_color_t on_color    = lv_color_make(0x80, 0x80, 0x80);
-    lv_color_t off_color   = lv_color_make(0x20, 0x20, 0x20);
+    lv_obj_t *btns[3] = {s_btn_mode_s, s_btn_mode_a, s_btn_mode_b};
+    view_mode_t modes[3] = {VIEW_SPECTRO, VIEW_AMPLITUDE, VIEW_BOTH};
+    lv_color_t on_color = lv_color_make(0x80, 0x80, 0x80);
+    lv_color_t off_color = lv_color_make(0x20, 0x20, 0x20);
     for (int i = 0; i < 3; i++) {
-        if (!btns[i]) continue;
+        if (!btns[i])
+            continue;
         lv_obj_set_style_bg_color(btns[i], (s_view_mode == modes[i]) ? on_color : off_color, 0);
     }
 }
@@ -617,16 +687,18 @@ static lv_obj_t *make_button(lv_obj_t *parent, const char *text, int x, int y, i
 // ---------- Options screen ----------
 
 static void update_field_label(lv_obj_t *lbl, int hz) {
-    if (!lbl) return;
+    if (!lbl)
+        return;
     lv_label_set_text_fmt(lbl, "%d Hz", hz);
 }
 
 // Gate the right-side OK/Cancel/Reset buttons so the keypad's tap area can't
 // fall through onto a screen-action button.
 static void set_opt_buttons_enabled(bool en) {
-    lv_obj_t *btns[] = { s_opt_btn_ok, s_opt_btn_cancel, s_opt_btn_reset };
+    lv_obj_t *btns[] = {s_opt_btn_ok, s_opt_btn_cancel, s_opt_btn_reset};
     for (int i = 0; i < 3; i++) {
-        if (!btns[i]) continue;
+        if (!btns[i])
+            continue;
         if (en) {
             lv_obj_remove_state(btns[i], LV_STATE_DISABLED);
             lv_obj_add_flag(btns[i], LV_OBJ_FLAG_CLICKABLE);
@@ -638,14 +710,16 @@ static void set_opt_buttons_enabled(bool en) {
 }
 
 static void show_keypad(void) {
-    if (!s_keypad) return;
+    if (!s_keypad)
+        return;
     lv_obj_remove_flag(s_keypad, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(s_keypad);
     set_opt_buttons_enabled(false);
 }
 
 static void hide_keypad(void) {
-    if (s_keypad) lv_obj_add_flag(s_keypad, LV_OBJ_FLAG_HIDDEN);
+    if (s_keypad)
+        lv_obj_add_flag(s_keypad, LV_OBJ_FLAG_HIDDEN);
     set_opt_buttons_enabled(true);
 }
 
@@ -672,7 +746,8 @@ static void keypad_cb(lv_event_t *e) {
     lv_obj_t *bm = (lv_obj_t *)lv_event_get_target(e);
     uint32_t id = lv_buttonmatrix_get_selected_button(bm);
     const char *txt = lv_buttonmatrix_get_button_text(bm, id);
-    if (!txt) return;
+    if (!txt)
+        return;
     int *target = (s_opt_focus == 0) ? &s_opt_lo_hz : &s_opt_hi_hz;
     if (strcmp(txt, "<") == 0) {
         *target /= 10;
@@ -681,7 +756,8 @@ static void keypad_cb(lv_event_t *e) {
         return;
     } else if (txt[0] >= '0' && txt[0] <= '9') {
         int new_v = (*target) * 10 + (txt[0] - '0');
-        if (new_v <= 9999) *target = new_v;
+        if (new_v <= 9999)
+            *target = new_v;
     }
     update_field_label((s_opt_focus == 0) ? s_lbl_lo : s_lbl_hi, *target);
 }
@@ -690,8 +766,8 @@ static void opt_ok_cb(lv_event_t *e) {
     (void)e;
     hide_keypad();
     if (s_opt_lo_hz < 1 || s_opt_hi_hz <= s_opt_lo_hz || s_opt_hi_hz >= SPECTRO_MAX_HZ) {
-        warn(TAG, "options invalid: lo=%d hi=%d (range 1..%d, hi>lo)",
-             s_opt_lo_hz, s_opt_hi_hz, SPECTRO_MAX_HZ);
+        warn(TAG, "options invalid: lo=%d hi=%d (range 1..%d, hi>lo)", s_opt_lo_hz, s_opt_hi_hz,
+             SPECTRO_MAX_HZ);
         return;
     }
     s_nasal_lo_hz = s_opt_lo_hz;
@@ -757,23 +833,19 @@ static void build_options_ui(void) {
     lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
 
     // Left half: Freq Lo / Freq Hi cards
-    s_lbl_lo = make_field(s_scr_opt, "Freq Low",  8, 30, 144, 50, opt_lo_cb);
+    s_lbl_lo = make_field(s_scr_opt, "Freq Low", 8, 30, 144, 50, opt_lo_cb);
     s_lbl_hi = make_field(s_scr_opt, "Freq High", 8, 90, 144, 50, opt_hi_cb);
 
     // Right half: OK / Cancel / Reset
     const int rx = 168, rw = 144, rh = 35;
-    s_opt_btn_ok     = make_button(s_scr_opt, "OK",     rx, 30,  rw, rh, COL_START_ON,  opt_ok_cb);
-    s_opt_btn_cancel = make_button(s_scr_opt, "Cancel", rx, 75,  rw, rh, COL_RESET,     opt_cancel_cb);
-    s_opt_btn_reset  = make_button(s_scr_opt, "Reset",  rx, 120, rw, rh, COL_STOP_OFF,  opt_reset_cb);
+    s_opt_btn_ok = make_button(s_scr_opt, "OK", rx, 30, rw, rh, COL_START_ON, opt_ok_cb);
+    s_opt_btn_cancel = make_button(s_scr_opt, "Cancel", rx, 75, rw, rh, COL_RESET, opt_cancel_cb);
+    s_opt_btn_reset = make_button(s_scr_opt, "Reset", rx, 120, rw, rh, COL_STOP_OFF, opt_reset_cb);
 
     // Telephone keypad — overlays the right half (covers OK/Cancel/Reset, which
     // are also disabled while it's open so a stray tap can't fall through).
-    static const char *kp_map[] = {
-        "1", "2", "3", "\n",
-        "4", "5", "6", "\n",
-        "7", "8", "9", "\n",
-        "<", "0", "OK", ""
-    };
+    static const char *kp_map[] = {"1", "2", "3", "\n", "4", "5", "6",  "\n",
+                                   "7", "8", "9", "\n", "<", "0", "OK", ""};
     s_keypad = lv_buttonmatrix_create(s_scr_opt);
     lv_buttonmatrix_set_map(s_keypad, kp_map);
     lv_obj_set_size(s_keypad, 156, 200);
@@ -787,7 +859,8 @@ static void build_options_ui(void) {
 
 static void show_options_screen(void) {
     lv_lock();
-    if (!s_scr_opt) build_options_ui();
+    if (!s_scr_opt)
+        build_options_ui();
     update_field_label(s_lbl_lo, s_opt_lo_hz);
     update_field_label(s_lbl_hi, s_opt_hi_hz);
     hide_keypad();
@@ -797,7 +870,8 @@ static void show_options_screen(void) {
 
 static void show_main_screen(void) {
     lv_lock();
-    if (s_scr_main) lv_screen_load(s_scr_main);
+    if (s_scr_main)
+        lv_screen_load(s_scr_main);
     lv_unlock();
 }
 
@@ -856,20 +930,22 @@ static void build_ui(void) {
     // Mode buttons (S / A / B) — squares stacked along the top-left, overlaying
     // the upper spectrogram. Toggle which view is rendered.
     const int mb_size = 27;
-    const int mb_gap  = 7;
-    const int mb_x    = 2;
-    s_btn_mode_s = make_button(scr, "S", mb_x, 2,                       mb_size, mb_size, COL_RESET, btn_mode_s_cb);
-    s_btn_mode_a = make_button(scr, "A", mb_x, 2 + (mb_size + mb_gap),  mb_size, mb_size, COL_RESET, btn_mode_a_cb);
-    s_btn_mode_b = make_button(scr, "B", mb_x, 2 + (mb_size + mb_gap)*2, mb_size, mb_size, COL_RESET, btn_mode_b_cb);
+    const int mb_gap = 7;
+    const int mb_x = 2;
+    s_btn_mode_s = make_button(scr, "S", mb_x, 2, mb_size, mb_size, COL_RESET, btn_mode_s_cb);
+    s_btn_mode_a = make_button(scr, "A", mb_x, 2 + (mb_size + mb_gap), mb_size, mb_size, COL_RESET,
+                               btn_mode_a_cb);
+    s_btn_mode_b = make_button(scr, "B", mb_x, 2 + (mb_size + mb_gap) * 2, mb_size, mb_size,
+                               COL_RESET, btn_mode_b_cb);
     refresh_mode_button_styles();
 
     // Button row: Start | Stop | Reset (72w each) + Opt (small, 64w)
     const int btn_h = 35;
     const int btn_y = BUTTON_ROW_Y + 2;
-    s_btn_start = make_button(scr, "Start",   8, btn_y, 72, btn_h, COL_START_ON, btn_start_cb);
-    s_btn_stop  = make_button(scr, "Stop",   88, btn_y, 72, btn_h, COL_STOP_OFF, btn_stop_cb);
-    s_btn_reset = make_button(scr, "Reset", 168, btn_y, 72, btn_h, COL_RESET,    btn_reset_cb);
-    s_btn_opt   = make_button(scr, "Opt",   248, btn_y, 64, btn_h, COL_RESET,    btn_opt_cb);
+    s_btn_start = make_button(scr, "Start", 8, btn_y, 72, btn_h, COL_START_ON, btn_start_cb);
+    s_btn_stop = make_button(scr, "Stop", 88, btn_y, 72, btn_h, COL_STOP_OFF, btn_stop_cb);
+    s_btn_reset = make_button(scr, "Reset", 168, btn_y, 72, btn_h, COL_RESET, btn_reset_cb);
+    s_btn_opt = make_button(scr, "Opt", 248, btn_y, 64, btn_h, COL_RESET, btn_opt_cb);
     refresh_button_styles();
     refresh_status_label(0, 0.0);
 
@@ -877,9 +953,11 @@ static void build_ui(void) {
 }
 
 static void spectro_task(void *arg) {
-    notice(TAG, "spectro task  N=%d hop=%d cols=%d  bins spectro=[%d..%d]  nasal=[%dHz..%dHz]  win=%ds (%d frames)",
-           N, HOP, SPECTRO_W, MIN_BIN, MAX_BIN, s_nasal_lo_hz, s_nasal_hi_hz,
-           NASALANCE_WINDOW_SEC, NASAL_FRAMES);
+    notice(TAG,
+           "spectro task  N=%d hop=%d cols=%d  bins spectro=[%d..%d]  nasal=[%dHz..%dHz]  win=%ds "
+           "(%d frames)",
+           N, HOP, SPECTRO_W, MIN_BIN, MAX_BIN, s_nasal_lo_hz, s_nasal_hi_hz, NASALANCE_WINDOW_SEC,
+           NASAL_FRAMES);
 
     int32_t *s1 = heap_caps_malloc(N * sizeof(int32_t), MALLOC_CAP_INTERNAL);
     int32_t *s2 = heap_caps_malloc(N * sizeof(int32_t), MALLOC_CAP_INTERNAL);
@@ -949,13 +1027,32 @@ static void spectro_task(void *arg) {
         float e1 = band_energy(re1, im1);
         float e2 = band_energy(re2, im2);
         float e_nasal = (NASALANCE_NASAL_MIC == 1) ? e1 : e2;
-        float e_oral  = (NASALANCE_NASAL_MIC == 1) ? e2 : e1;
+        float e_oral = (NASALANCE_NASAL_MIC == 1) ? e2 : e1;
         if (s_rec_state == REC_RUNNING) {
             push_nasalance(e_nasal, e_oral);
         }
 
         const uint16_t COL_TRACE_TOP = 0x07FF; // cyan
         const uint16_t COL_TRACE_BOT = 0x07E0; // green
+
+#ifdef ENABLE_HTTP
+        // Push to the WS broadcast pipeline before grabbing the LVGL lock so
+        // network I/O never gates display rendering. Drops if no clients connected.
+        {
+            uint8_t bins_top[BINS_OUT];
+            uint8_t bins_bot[BINS_OUT];
+            bins_to_dbu8(re1, im1, bins_top);
+            bins_to_dbu8(re2, im2, bins_bot);
+            uint8_t nasal_pct = 255; // N/A while not recording
+            if (s_rec_state == REC_RUNNING) {
+                double denom = s_nasal_sum + s_oral_sum;
+                if (denom > 1e-12) nasal_pct = (uint8_t)(100.0 * s_nasal_sum / denom + 0.5);
+            }
+            a_http_push_frame(bins_top, bins_bot, BINS_OUT,
+                              amp_db_to_u8(amp_db1), amp_db_to_u8(amp_db2),
+                              nasal_pct);
+        }
+#endif // ENABLE_HTTP
 
         view_mode_t mode = s_view_mode;
 
@@ -1012,14 +1109,17 @@ static void spectro_task(void *arg) {
 
 esp_err_t nasometer_init(void) {
     notice(TAG, "nasometer_init()");
+    info(TAG, "allocating buffers");
 
     uint32_t caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
     s_buf_top = heap_caps_malloc(SPECTRO_W * SPECTRO_H * BYTES_PER_PX, caps);
     s_buf_bot = heap_caps_malloc(SPECTRO_W * SPECTRO_H * BYTES_PER_PX, caps);
     if (!s_buf_top || !s_buf_bot) {
         warn(TAG, "PSRAM canvas alloc failed; trying internal");
-        if (!s_buf_top) s_buf_top = heap_caps_malloc(SPECTRO_W * SPECTRO_H * BYTES_PER_PX, MALLOC_CAP_8BIT);
-        if (!s_buf_bot) s_buf_bot = heap_caps_malloc(SPECTRO_W * SPECTRO_H * BYTES_PER_PX, MALLOC_CAP_8BIT);
+        if (!s_buf_top)
+            s_buf_top = heap_caps_malloc(SPECTRO_W * SPECTRO_H * BYTES_PER_PX, MALLOC_CAP_8BIT);
+        if (!s_buf_bot)
+            s_buf_bot = heap_caps_malloc(SPECTRO_W * SPECTRO_H * BYTES_PER_PX, MALLOC_CAP_8BIT);
         if (!s_buf_top || !s_buf_bot) {
             err(TAG, "canvas allocation failed");
             return ESP_ERR_NO_MEM;

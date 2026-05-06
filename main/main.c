@@ -28,7 +28,9 @@ void app_main(void) {
     uint32_t cnt = 0;
     while (1) {
         cnt++;
-        // debug(TAG, "tick(%u)", cnt);
+        if (cnt % 30 == 0) {
+            debug(TAG, "tick(%u)", cnt);
+        }
         /*
         if (cnt % 5 == 0) {
             warn(TAG, "---- before task creation:");

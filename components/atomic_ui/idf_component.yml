@@ -1,0 +1,5 @@
+dependencies:
+  idf:
+    version: '>=5.5'
+description: Atomic UI
+version: 0.0.1

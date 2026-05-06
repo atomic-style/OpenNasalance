@@ -23,7 +23,7 @@ static const char *TAG = "さ";
 #include "atomic_lcd.h"
 
 static esp_err_t init_lcd(void) {
-    try(a_lcd_init(DEV_ID));
+    try(a_lcd_init(LCD_ES3N28P));
     return ESP_OK;
 }
 #endif // ENABLE_LCD
