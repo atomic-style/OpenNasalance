@@ -1,59 +1,45 @@
-// Copyright (C) 2026 Atomic Style, LLC
-// SPDX-License-Identifier: GPL-3.0-or-later
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-
-#include "freertos/FreeRTOS.h"
+#include "atomic_bits.h"
+#include "atomic_err.h"
+#include "atomic_log.h"
 #include "esp_err.h"
 #include "esp_log.h"
-#include "atomic_bits.h"
-#include "atomic_log.h"
-#include "atomic_err.h"
+#include "freertos/FreeRTOS.h"
 
 static const char *TAG = "】";
 
 EventGroupHandle_t atomic_bits;
 
-enum
-{
-    EVENT_BITS = 24,
-    ALL_BITS = ((1 << 24) - 1)
-};
+// FreeRTOS reserves the top 8 bits of an event group for the kernel, so
+// only bits 0..23 are usable. Keep this in lockstep with atomic_bits.h.
+enum { EVENT_BITS = 24, ALL_BITS = ((1 << 24) - 1) };
 
-static void a_bits_reset(void)
-{
-    xEventGroupClearBits(atomic_bits, ALL_BITS); 
+static void a_bits_reset(void) { xEventGroupClearBits(atomic_bits, ALL_BITS); }
+
+bool a_bits(EventBits_t bit) {
+  return (bool)((xEventGroupGetBits(atomic_bits) & bit) != 0);
 }
 
-bool a_bits(EventBits_t bit)
-{
-    return (bool) ((xEventGroupGetBits(atomic_bits) & bit) != 0);
+void a_bits_set(EventBits_t bits) { xEventGroupSetBits(atomic_bits, bits); }
+
+void a_bits_wait(EventBits_t bit) {
+  xEventGroupWaitBits(atomic_bits, bit, pdFALSE, pdTRUE, portMAX_DELAY);
 }
 
-void a_bits_set(EventBits_t bits)
-{
-    xEventGroupSetBits(atomic_bits, bits);
+EventBits_t a_bits_wait_any(EventBits_t bits) {
+  // pdFALSE on xClearOnExit so other waiters still see the bits.
+  // pdFALSE on xWaitForAllBits so any-bit-set wakes us.
+  return xEventGroupWaitBits(atomic_bits, bits, pdFALSE, pdFALSE,
+                             portMAX_DELAY);
 }
 
-void a_bits_wait(EventBits_t bit)
-{
-    xEventGroupWaitBits(atomic_bits, bit, pdFALSE, pdTRUE, portMAX_DELAY);
-}
-
-void a_bits_clear(EventBits_t bits)
-{
-    xEventGroupClearBits(atomic_bits, bits); 
-}
+void a_bits_clear(EventBits_t bits) { xEventGroupClearBits(atomic_bits, bits); }
 
 esp_err_t a_bits_init(void) {
-    debug(TAG, "a_bits_init()");
-    atomic_bits = xEventGroupCreate();
-    a_bits_reset();
-    a_bits_set(BIT_INIT);
-    return ESP_OK;
+  // debug(TAG, "a_bits_init()");
+  atomic_bits = xEventGroupCreate();
+  a_bits_reset();
+  a_bits_set(BIT_INIT);
+  return ESP_OK;
 }
 /*
 void atomic_bits_set(EventBits_t bits)
@@ -63,7 +49,7 @@ void atomic_bits_set(EventBits_t bits)
 
 void atomic_bits_clear(EventBits_t bits)
 {
-    xEventGroupClearBits(atomic_bits, bits); 
+    xEventGroupClearBits(atomic_bits, bits);
 }
 
 void atomic_bits_wait(EventBits_t bit)
@@ -108,4 +94,3 @@ void atomic_bits_debug(void)
     ESP_LOGI(TAG, "atomic_bits: %s", bits_char);
 }
 */
-

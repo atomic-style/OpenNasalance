@@ -1,0 +1,17 @@
+menu "atomic_net"
+
+    config A_WIFI_ENABLE_STA
+        bool "Compile Wi-Fi Station (STA) support"
+        default y
+        help
+            Compile the STA side of atomic_wifi. With this off, a_wifi_apply_mode(STA)
+            returns ESP_ERR_NOT_SUPPORTED and AP becomes the only available mode.
+
+    config A_WIFI_ENABLE_AP
+        bool "Compile Wi-Fi SoftAP support"
+        default y
+        help
+            Compile the SoftAP side of atomic_wifi. With this off, a_wifi_apply_mode(AP)
+            returns ESP_ERR_NOT_SUPPORTED and STA becomes the only available mode.
+
+endmenu

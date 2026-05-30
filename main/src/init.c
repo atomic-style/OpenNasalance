@@ -20,6 +20,7 @@
 #include "esp_err.h"
 #include "a_mic.h"
 #include "nasometer.h"
+#include <string.h> // strcpy in init_nvs_defaults
 
 #ifdef ENABLE_BME280
 #include "pressure.h"
@@ -30,9 +31,14 @@
 #endif
 
 #ifdef ENABLE_WIFI
-#include <string.h>
 #include "atomic_net.h"
+// wifi_credentials.h is optional — if the file isn't present (e.g. clean
+// clone, no STA seed wanted), STA simply starts blank and the user enters
+// credentials via the on-screen Wi-Fi menu.
+#if __has_include("wifi_credentials.h")
 #include "wifi_credentials.h"
+#define HAVE_WIFI_CREDENTIALS 1
+#endif
 #endif
 
 #ifdef ENABLE_HTTP
@@ -64,11 +70,16 @@ static esp_err_t init_nvs(void) {
 
 #ifdef ENABLE_WIFI
 static esp_err_t init_net(void) {
-    wifi_config_t cfg = {0};
-    strncpy((char *)cfg.sta.ssid, WIFI_SSID, sizeof(cfg.sta.ssid) - 1);
-    strncpy((char *)cfg.sta.password, WIFI_PASSWORD, sizeof(cfg.sta.password) - 1);
-    cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
-    a_bits_set(BIT_NTP_ENABLE); // a_net_task brings up NTP after wifi associates
+    a_wifi_cfg_t cfg = {
+        .default_mode = WIFI_DEFAULT_MODE,
+#ifdef HAVE_WIFI_CREDENTIALS
+        .sta_default_ssid = WIFI_SSID,
+        .sta_default_pass = WIFI_PASSWORD,
+#endif
+        .ap_ssid = WIFI_AP_SSID, // NULL → atomic_wifi uses NVS "unit_name" (DEV_UNIT)
+        .ap_pass = WIFI_AP_PASS,
+    };
+    a_bits_set(BIT_NTP_ENABLE); // atomic_net spawns NTP once STA associates
     return a_net_init(&cfg);
 }
 #endif
@@ -110,7 +121,7 @@ void init() {
 
 #ifdef ENABLE_DISPLAY
     try(init_display());
-    try(atomic_ui());
+    try(atomic_ui(DEV_PROJECT));
 #endif // ENABLE_DISPLAY
 
 #ifdef ENABLE_TOUCH
@@ -126,8 +137,10 @@ void init() {
 #endif // ENABLE_HTTP
 
 #ifdef ENABLE_SD
-    // Mount SD before display so atomic_lvgl's task picks up BIT_SD_READY
-    // before registering its filesystem driver.
+    // SD is mounted here, after the display/UI are up. atomic_lvgl's task
+    // tolerates BIT_SD_READY arriving after it starts (it gates JPEG service on
+    // the queue handle, not the bit). WAV recording uses fopen("/sd/...")
+    // directly, independent of LVGL's filesystem driver.
     if (init_sd() != ESP_OK) {
         warn(TAG, "SD mount failed — continuing without storage");
     }
@@ -142,14 +155,37 @@ void init() {
 #endif // ENABLE_BME280
 
 #ifdef ENABLE_MIC
-    a_mic_441_config_t a_mic_441_config = {
+    // Mic-init failure is non-fatal: the nasometer view still needs to come
+    // up so the user has UI even when the mic hardware isn't present.
+#if defined(MIC_T5837)
+    a_mic_t5837_config_t a_mic_cfg = {
+        .pin_clk = PIN_MIC_CLK,
+        .pin_data_1 = PIN_MIC_DATA_1,
+        .pin_data_2 = PIN_MIC_DATA_2,
+        .sample_rate = MIC_SAMPLE_RATE,
+        .buf_samples = MIC_BUF_SAMPLES,
+        .gain = MIC_SW_GAIN,
+#ifdef MIC_T5837_STEREO
+        .stereo = true,
+#else
+        .stereo = false,
+#endif
+    };
+    esp_err_t mic_r = a_mic_t5837_init(&a_mic_cfg);
+#elif defined(MIC_441)
+    a_mic_441_config_t a_mic_cfg = {
         .pin_clk = PIN_MIC_CLK,
         .pin_ws = PIN_MIC_WS,
         .pin_data_1 = PIN_MIC_DATA_1,
         .pin_data_2 = PIN_MIC_DATA_2,
         .sample_rate = MIC_SAMPLE_RATE,
     };
-    try(a_mic_441_init(&a_mic_441_config));
+    esp_err_t mic_r = a_mic_441_init(&a_mic_cfg);
+#endif
+    if (mic_r != ESP_OK) {
+        warn(TAG, "mic init failed: %s — nasometer will show no data",
+             esp_err_to_name(mic_r));
+    }
     try(nasometer_init());
 #endif // ENABLE_MIC
 

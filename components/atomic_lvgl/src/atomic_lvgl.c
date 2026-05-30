@@ -1,11 +1,3 @@
-// Copyright (C) 2026 Atomic Style, LLC
-// SPDX-License-Identifier: GPL-3.0-or-later
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-
 #include "atomic_lvgl.h"
 
 #include "atomic_bits.h"
@@ -160,7 +152,13 @@ static void atomic_lvgl_task(void *arg) {
     a_bits_set(BIT_LVGL_READY);
 
     while (1) {
-        if (a_bits(BIT_SD_READY)) {
+        // Gate on the queue itself, not BIT_SD_READY: the queue is only created
+        // above when the card is already mounted as this task starts. If SD
+        // mounts later (the usual order — init_sd() runs after the display is
+        // brought up), BIT_SD_READY flips true while s_jpeg_queue is still NULL,
+        // and receiving from a NULL queue asserts. No queue → no JPEG service,
+        // but lv_task_handler() below still pumps the UI.
+        if (s_jpeg_queue) {
             // Check for JPEG load requests
             char *filename = NULL;
             if (xQueueReceive(s_jpeg_queue, &filename, 0) == pdTRUE) {

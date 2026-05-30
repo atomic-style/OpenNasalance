@@ -24,11 +24,24 @@
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/stream_buffer.h"
 #include "freertos/task.h"
 #include "lvgl.h"
 
 #ifdef ENABLE_HTTP
 #include "atomic_http.h"
+#endif
+
+// Read path is mic-agnostic: both backends fill two int32 lanes in the same
+// sample layout (16-bit PCM promoted to the high half for the T5837, 24-bit
+// MSB-justified for the 441), so the DSP/WAV code below is unchanged.
+#if defined(MIC_T5837)
+#define mic_read_dual a_mic_t5837_read_dual
+#elif defined(MIC_441)
+#define mic_read_dual a_mic_441_read_dual
+#else
+#error "No microphone type selected (MIC_T5837 / MIC_441)"
 #endif
 
 static const char *TAG = "㊣";
@@ -424,16 +437,40 @@ static void nvs_save_options(void) {
 //
 // No RTC on this board, so filenames use a scanned sequence number rather
 // than wall-clock date/time:  /sd/Nas_0001_mic1.wav, /sd/Nas_0001_mic2.wav.
-// Write requests are flagged from the LVGL thread (button callbacks) and
-// serviced on the audio thread (spectro_task), which owns the FILE handles.
+// Open/close are flagged from the LVGL thread (button callbacks). The capture
+// task enqueues PCM into s_wav_stream; a dedicated wav_writer_task owns the FILE
+// handles and drains the stream to SD — so SD write latency never stalls the
+// real-time capture loop (that was dropping samples and slowing the display
+// while recording).
 
 #define WAV_DIR "/sd"
 
 static FILE *s_wav_a = NULL;
 static FILE *s_wav_b = NULL;
 static uint32_t s_wav_samples = 0;
+// Samples dropped because the capture->writer stream was full (SD fell behind).
+// Written by the capture task, read by the writer on close. Diagnostic only;
+// a drop is a recoverable gap (see wav_enqueue) — non-zero means the SD card
+// couldn't keep up and that recording has a hole.
+static volatile uint32_t s_wav_dropped = 0;
 static volatile bool s_wav_request_open = false;
 static volatile bool s_wav_request_close = false;
+// Set true by the writer only once the files are actually open; the capture task
+// gates WAV enqueue on this (not on REC_RUNNING) so it never enqueues before the
+// stream is reset and the files exist — no lost start, no stale data.
+static volatile bool s_wav_active = false;
+
+// Capture -> writer PCM hand-off. Sized to absorb multi-hundred-ms SD latency
+// spikes at the capture rate (~96-192 KB/s); storage lives in PSRAM.
+#define WAV_STREAM_BYTES (256 * 1024)
+static StreamBufferHandle_t s_wav_stream = NULL;
+static StaticStreamBuffer_t s_wav_stream_struct;
+
+// True PCM rate, measured at runtime by capture_task — the PDM driver does not
+// necessarily deliver samples at MIC_SAMPLE_RATE. Used for the WAV header so
+// recordings play back at the correct speed. Falls back to MIC_SAMPLE_RATE
+// until the measurement completes (~2 s after the audio task starts).
+static volatile uint32_t s_measured_rate_hz = MIC_SAMPLE_RATE;
 
 static void wav_put_u32_le(uint8_t *p, uint32_t v) {
     p[0] = (uint8_t)(v);
@@ -451,7 +488,7 @@ static void wav_write_header(FILE *f, uint32_t total_samples) {
     uint8_t hdr[44];
     uint32_t data_bytes = total_samples * 2; // 16-bit mono
     uint32_t riff_size = 36 + data_bytes;
-    uint32_t sample_rate = MIC_SAMPLE_RATE;
+    uint32_t sample_rate = s_measured_rate_hz;
     uint16_t num_ch = 1, bits = 16;
     uint32_t byte_rate = sample_rate * num_ch * (bits / 8);
     uint16_t block_align = num_ch * (bits / 8);
@@ -519,6 +556,7 @@ static void wav_open_pair(void) {
     fwrite(blank, 1, 44, s_wav_a);
     fwrite(blank, 1, 44, s_wav_b);
     s_wav_samples = 0;
+    s_wav_dropped = 0;
     notice(TAG, "WAV: opened seq %04d", seq);
 }
 
@@ -533,20 +571,30 @@ static void wav_close_pair(void) {
         fclose(s_wav_b);
         s_wav_b = NULL;
     }
-    notice(TAG, "WAV: closed (%u samples)", (unsigned)s_wav_samples);
+    if (s_wav_dropped) {
+        warn(TAG, "WAV: closed (%u samples, %u DROPPED — SD too slow, recording has a gap)",
+             (unsigned)s_wav_samples, (unsigned)s_wav_dropped);
+    } else {
+        notice(TAG, "WAV: closed (%u samples)", (unsigned)s_wav_samples);
+    }
 }
 
-static void wav_write_frames(const int32_t *s1, const int32_t *s2, size_t n) {
-    if (!s_wav_a || !s_wav_b)
+// Capture-side: convert two int32 channels to interleaved 16-bit L/R PCM
+// pairs and enqueue for the writer. The two WAV files (mic1, mic2) are still
+// mono each; the stream carries pairs so a single read on the writer side
+// keeps the two channels aligned. Non-blocking (0 timeout) — if the writer
+// falls behind beyond the buffer, the frame is dropped rather than stalling
+// the real-time capture loop.
+static void wav_enqueue(const int32_t *s1, const int32_t *s2, size_t n) {
+    if (!s_wav_stream)
         return;
-    int16_t buf_a[128];
-    int16_t buf_b[128];
+    int16_t buf[128]; // 64 L/R pairs
     size_t i = 0;
     while (i < n) {
-        size_t chunk = n - i;
-        if (chunk > 128)
-            chunk = 128;
-        for (size_t k = 0; k < chunk; k++) {
+        size_t pairs = n - i;
+        if (pairs > 64)
+            pairs = 64;
+        for (size_t k = 0; k < pairs; k++) {
             int32_t v1 = s1[i + k] >> 16;
             int32_t v2 = s2[i + k] >> 16;
             if (v1 > 32767)
@@ -557,14 +605,74 @@ static void wav_write_frames(const int32_t *s1, const int32_t *s2, size_t n) {
                 v2 = 32767;
             if (v2 < -32768)
                 v2 = -32768;
-            buf_a[k] = (int16_t)v1;
-            buf_b[k] = (int16_t)v2;
+            buf[k * 2 + 0] = (int16_t)v1;
+            buf[k * 2 + 1] = (int16_t)v2;
         }
-        fwrite(buf_a, sizeof(int16_t), chunk, s_wav_a);
-        fwrite(buf_b, sizeof(int16_t), chunk, s_wav_b);
-        i += chunk;
+        // All-or-nothing per chunk, sized in whole 4-byte pairs. A partial
+        // write that ended on an odd byte (or half-pair) would permanently
+        // shift the L/R boundary so the rest of both files play back
+        // swapped or byte-shifted. If the chunk won't fit (writer behind /
+        // SD stall), drop it intact and count it — a gap is recoverable, a
+        // misaligned tail is not.
+        size_t want = pairs * 2 * sizeof(int16_t);
+        if (xStreamBufferSpacesAvailable(s_wav_stream) >= want) {
+            xStreamBufferSend(s_wav_stream, buf, want, 0);
+        } else {
+            s_wav_dropped += (uint32_t)pairs;
+        }
+        i += pairs;
     }
-    s_wav_samples += (uint32_t)n;
+}
+
+// Dedicated SD writer: owns the FILE handles, services open/close, and drains
+// the PCM stream to the two mono WAV files (mic1 -> s_wav_a, mic2 -> s_wav_b).
+// Slow SD writes here never reach the capture task.
+static void wav_writer_task(void *arg) {
+    (void)arg;
+    int16_t in_buf[256];  // 128 L/R pairs per read
+    int16_t l_buf[128];
+    int16_t r_buf[128];
+    while (1) {
+        if (s_wav_request_open) {
+            s_wav_request_open = false;
+            xStreamBufferReset(s_wav_stream); // safe: capture isn't enqueuing yet
+            wav_open_pair();
+            s_wav_active = (s_wav_a != NULL && s_wav_b != NULL);
+        }
+
+        size_t got = xStreamBufferReceive(s_wav_stream, in_buf, sizeof(in_buf), pdMS_TO_TICKS(100));
+        if (got > 0 && s_wav_a && s_wav_b) {
+            // wav_enqueue only ever sends whole 4-byte pairs, so got is
+            // always a multiple of (2 * sizeof(int16_t)).
+            size_t pairs = got / (2 * sizeof(int16_t));
+            for (size_t k = 0; k < pairs; k++) {
+                l_buf[k] = in_buf[k * 2 + 0];
+                r_buf[k] = in_buf[k * 2 + 1];
+            }
+            fwrite(l_buf, sizeof(int16_t), pairs, s_wav_a);
+            fwrite(r_buf, sizeof(int16_t), pairs, s_wav_b);
+            s_wav_samples += (uint32_t)pairs;
+        }
+
+        if (s_wav_request_close) {
+            s_wav_active = false; // capture stops enqueuing immediately
+            // Flush whatever the capture task enqueued before it stopped.
+            while ((got = xStreamBufferReceive(s_wav_stream, in_buf, sizeof(in_buf), 0)) > 0) {
+                if (s_wav_a && s_wav_b) {
+                    size_t pairs = got / (2 * sizeof(int16_t));
+                    for (size_t k = 0; k < pairs; k++) {
+                        l_buf[k] = in_buf[k * 2 + 0];
+                        r_buf[k] = in_buf[k * 2 + 1];
+                    }
+                    fwrite(l_buf, sizeof(int16_t), pairs, s_wav_a);
+                    fwrite(r_buf, sizeof(int16_t), pairs, s_wav_b);
+                    s_wav_samples += (uint32_t)pairs;
+                }
+            }
+            s_wav_request_close = false;
+            wav_close_pair();
+        }
+    }
 }
 
 // Bright colors mean "this action is available"; dim means "current state,
@@ -756,7 +864,7 @@ static void keypad_cb(lv_event_t *e) {
         return;
     } else if (txt[0] >= '0' && txt[0] <= '9') {
         int new_v = (*target) * 10 + (txt[0] - '0');
-        if (new_v <= 9999)
+        if (new_v <= NASALANCE_BAND_MAX_HZ)
             *target = new_v;
     }
     update_field_label((s_opt_focus == 0) ? s_lbl_lo : s_lbl_hi, *target);
@@ -765,9 +873,9 @@ static void keypad_cb(lv_event_t *e) {
 static void opt_ok_cb(lv_event_t *e) {
     (void)e;
     hide_keypad();
-    if (s_opt_lo_hz < 1 || s_opt_hi_hz <= s_opt_lo_hz || s_opt_hi_hz >= SPECTRO_MAX_HZ) {
+    if (s_opt_lo_hz < 1 || s_opt_hi_hz <= s_opt_lo_hz || s_opt_hi_hz > NASALANCE_BAND_MAX_HZ) {
         warn(TAG, "options invalid: lo=%d hi=%d (range 1..%d, hi>lo)", s_opt_lo_hz, s_opt_hi_hz,
-             SPECTRO_MAX_HZ);
+             NASALANCE_BAND_MAX_HZ);
         return;
     }
     s_nasal_lo_hz = s_opt_lo_hz;
@@ -894,13 +1002,9 @@ static void build_ui(void) {
     lv_obj_set_style_pad_all(scr, 0, 0);
     lv_obj_set_style_border_width(scr, 0, 0);
 
-    // Top title
-    s_lbl_top = lv_label_create(scr);
-    lv_obj_set_style_text_color(s_lbl_top, lv_color_white(), 0);
-    lv_label_set_text(s_lbl_top, "Nasometer");
-    lv_obj_set_size(s_lbl_top, DISPLAY_W, TEXT_TOP_H);
-    lv_obj_set_pos(s_lbl_top, 0, 2);
-    lv_obj_set_style_text_align(s_lbl_top, LV_TEXT_ALIGN_CENTER, 0);
+    // Top of the screen is owned by the atomic_ui header bar — no local
+    // title here. s_lbl_top is left NULL; any code that still references it
+    // already null-checks.
 
     // Top spectrogram canvas
     s_canvas_top = lv_canvas_create(scr);
@@ -952,12 +1056,27 @@ static void build_ui(void) {
     lv_unlock();
 }
 
-static void spectro_task(void *arg) {
-    notice(TAG,
-           "spectro task  N=%d hop=%d cols=%d  bins spectro=[%d..%d]  nasal=[%dHz..%dHz]  win=%ds "
-           "(%d frames)",
-           N, HOP, SPECTRO_W, MIN_BIN, MAX_BIN, s_nasal_lo_hz, s_nasal_hi_hz, NASALANCE_WINDOW_SEC,
-           NASAL_FRAMES);
+// --- capture -> render hand-off ---------------------------------------------
+// The capture task computes the FFT and publishes the latest spectrum here; the
+// render task copies it out under a brief lock and draws at its own pace. This
+// keeps the slow LVGL canvas scroll off the real-time capture loop.
+typedef struct {
+    float re1[N], im1[N];
+    float re2[N], im2[N];
+    int amp_y1, amp_y2;
+} spectrum_t;
+static spectrum_t *s_spec = NULL;              // shared latest frame, guarded by s_spec_mu
+static SemaphoreHandle_t s_spec_mu = NULL;
+static SemaphoreHandle_t s_frame_ready = NULL; // capture -> render, binary (last-write-wins)
+
+// Real-time capture + DSP. This is the ONLY task that reads the mic, so nothing
+// downstream (display, SD) can stall it and overrun the I2S DMA. It maintains
+// the rolling window, runs the FFT, accumulates nasalance every frame, enqueues
+// WAV PCM, pushes WS frames, and publishes the spectrum for the render task.
+static void capture_task(void *arg) {
+    (void)arg;
+    notice(TAG, "capture task  N=%d hop=%d  nasal=[%dHz..%dHz]  win=%ds (%d frames)", N, HOP,
+           s_nasal_lo_hz, s_nasal_hi_hz, NASALANCE_WINDOW_SEC, NASAL_FRAMES);
 
     int32_t *s1 = heap_caps_malloc(N * sizeof(int32_t), MALLOC_CAP_INTERNAL);
     int32_t *s2 = heap_caps_malloc(N * sizeof(int32_t), MALLOC_CAP_INTERNAL);
@@ -972,26 +1091,21 @@ static void spectro_task(void *arg) {
         return;
     }
 
-    esp_err_t r = a_mic_441_read_dual(s1, s2, N, 2000);
+    esp_err_t r = mic_read_dual(s1, s2, N, 2000);
     if (r != ESP_OK) {
         err(TAG, "initial mic read failed: %s", esp_err_to_name(r));
         vTaskDelete(NULL);
         return;
     }
 
-    int ui_tick = 0;
+    // Measure the true PCM delivery rate over the first ~2 s for the WAV header
+    // (the PDM driver's delivered rate isn't simply MIC_SAMPLE_RATE). Now that
+    // capture is decoupled from rendering, this reflects the real I2S rate.
+    int64_t rate_t0 = esp_timer_get_time();
+    uint32_t rate_frames = 0;
+    bool rate_measured = false;
 
     while (1) {
-        // Service WAV open/close requests on this thread (we own the FILE handles).
-        if (s_wav_request_open) {
-            s_wav_request_open = false;
-            wav_open_pair();
-        }
-        if (s_wav_request_close) {
-            s_wav_request_close = false;
-            wav_close_pair();
-        }
-
         int64_t sum1 = 0, sum2 = 0;
         for (int n = 0; n < N; n++) {
             sum1 += s1[n] >> 8;
@@ -1021,9 +1135,7 @@ static void spectro_task(void *arg) {
         fft_forward(re1, im1);
         fft_forward(re2, im2);
 
-        // Per-frame band energies. Mic assignment is configurable so the board
-        // can be wired either way. Accumulation is gated on the Start/Stop UI —
-        // the spectrograms keep scrolling either way so the user can preview.
+        // Per-frame band energies, accumulated every frame so nasalance is exact.
         float e1 = band_energy(re1, im1);
         float e2 = band_energy(re2, im2);
         float e_nasal = (NASALANCE_NASAL_MIC == 1) ? e1 : e2;
@@ -1032,12 +1144,8 @@ static void spectro_task(void *arg) {
             push_nasalance(e_nasal, e_oral);
         }
 
-        const uint16_t COL_TRACE_TOP = 0x07FF; // cyan
-        const uint16_t COL_TRACE_BOT = 0x07E0; // green
-
 #ifdef ENABLE_HTTP
-        // Push to the WS broadcast pipeline before grabbing the LVGL lock so
-        // network I/O never gates display rendering. Drops if no clients connected.
+        // Drops if no WS clients are connected (cheap).
         {
             uint8_t bins_top[BINS_OUT];
             uint8_t bins_bot[BINS_OUT];
@@ -1048,36 +1156,105 @@ static void spectro_task(void *arg) {
                 double denom = s_nasal_sum + s_oral_sum;
                 if (denom > 1e-12) nasal_pct = (uint8_t)(100.0 * s_nasal_sum / denom + 0.5);
             }
-            a_http_push_frame(bins_top, bins_bot, BINS_OUT,
-                              amp_db_to_u8(amp_db1), amp_db_to_u8(amp_db2),
-                              nasal_pct);
+            a_http_push_frame(bins_top, bins_bot, BINS_OUT, amp_db_to_u8(amp_db1),
+                              amp_db_to_u8(amp_db2), nasal_pct);
         }
 #endif // ENABLE_HTTP
+
+        // Publish the spectrum for the render task. try-lock (0 timeout): if the
+        // render task is mid-copy we just skip this frame's publish — never block.
+        if (xSemaphoreTake(s_spec_mu, 0) == pdTRUE) {
+            memcpy(s_spec->re1, re1, N * sizeof(float));
+            memcpy(s_spec->im1, im1, N * sizeof(float));
+            memcpy(s_spec->re2, re2, N * sizeof(float));
+            memcpy(s_spec->im2, im2, N * sizeof(float));
+            s_spec->amp_y1 = amp_y1;
+            s_spec->amp_y2 = amp_y2;
+            xSemaphoreGive(s_spec_mu);
+            xSemaphoreGive(s_frame_ready);
+        }
+
+        // Advance the rolling window and read the next hop. The mic read is the
+        // only blocking call in this loop.
+        size_t read_n = (HOP < N) ? (size_t)HOP : (size_t)N;
+        if (HOP < N) {
+            memmove(s1, s1 + HOP, (N - HOP) * sizeof(int32_t));
+            memmove(s2, s2 + HOP, (N - HOP) * sizeof(int32_t));
+            r = mic_read_dual(s1 + (N - HOP), s2 + (N - HOP), HOP, 2000);
+            if (r == ESP_OK && s_wav_active) {
+                wav_enqueue(s1 + (N - HOP), s2 + (N - HOP), HOP);
+            }
+        } else {
+            r = mic_read_dual(s1, s2, N, 2000);
+            if (r == ESP_OK && s_wav_active) {
+                wav_enqueue(s1, s2, N);
+            }
+        }
+        if (r != ESP_OK) {
+            warn(TAG, "mic read: %s", esp_err_to_name(r));
+        } else if (!rate_measured) {
+            rate_frames += read_n;
+            int64_t dt = esp_timer_get_time() - rate_t0;
+            if (dt >= 2000000) { // 2 s window
+                s_measured_rate_hz = (uint32_t)((uint64_t)rate_frames * 1000000ULL / (uint64_t)dt);
+                rate_measured = true;
+                notice(TAG, "measured PCM rate = %u Hz (I2S cfg %d Hz); WAV header uses measured",
+                       (unsigned)s_measured_rate_hz, MIC_SAMPLE_RATE);
+            }
+        }
+    }
+}
+
+// Display renderer. Consumes the latest published spectrum and draws it under
+// the LVGL lock at its own pace — if it can't keep up it simply skips frames
+// (the shared slot is last-write-wins), so a slow draw never throttles capture.
+static void render_task(void *arg) {
+    (void)arg;
+    const uint16_t COL_TRACE_TOP = 0x07FF; // cyan
+    const uint16_t COL_TRACE_BOT = 0x07E0; // green
+
+    spectrum_t *snap = heap_caps_malloc(sizeof(spectrum_t), MALLOC_CAP_INTERNAL);
+    if (!snap) {
+        err(TAG, "render snapshot alloc failed");
+        vTaskDelete(NULL);
+        return;
+    }
+    int ui_tick = 0;
+
+    while (1) {
+        if (xSemaphoreTake(s_frame_ready, pdMS_TO_TICKS(200)) != pdTRUE) {
+            continue; // no new frame (capture idle/stalled) — don't scroll stale data
+        }
+
+        // Brief copy-out so we don't hold the lock during the slow draw below.
+        xSemaphoreTake(s_spec_mu, portMAX_DELAY);
+        memcpy(snap, s_spec, sizeof(spectrum_t));
+        xSemaphoreGive(s_spec_mu);
 
         view_mode_t mode = s_view_mode;
 
         lv_lock();
         if (mode == VIEW_AMPLITUDE) {
-            render_filled_column(s_buf_top, amp_y1, COL_TRACE_TOP);
-            render_filled_column(s_buf_bot, amp_y2, COL_TRACE_BOT);
-            s_amp_y_top_prev = amp_y1;
-            s_amp_y_bot_prev = amp_y2;
+            render_filled_column(s_buf_top, snap->amp_y1, COL_TRACE_TOP);
+            render_filled_column(s_buf_bot, snap->amp_y2, COL_TRACE_BOT);
+            s_amp_y_top_prev = snap->amp_y1;
+            s_amp_y_bot_prev = snap->amp_y2;
         } else {
-            render_column(s_buf_top, re1, im1);
-            render_column(s_buf_bot, re2, im2);
+            render_column(s_buf_top, snap->re1, snap->im1);
+            render_column(s_buf_bot, snap->re2, snap->im2);
             if (mode == VIEW_BOTH) {
-                render_amp_trace(s_buf_top, &s_amp_y_top_prev, amp_y1, COL_TRACE_TOP);
-                render_amp_trace(s_buf_bot, &s_amp_y_bot_prev, amp_y2, COL_TRACE_BOT);
+                render_amp_trace(s_buf_top, &s_amp_y_top_prev, snap->amp_y1, COL_TRACE_TOP);
+                render_amp_trace(s_buf_bot, &s_amp_y_bot_prev, snap->amp_y2, COL_TRACE_BOT);
             } else { // VIEW_SPECTRO — no overlay, but keep prev_y in sync
-                s_amp_y_top_prev = amp_y1;
-                s_amp_y_bot_prev = amp_y2;
+                s_amp_y_top_prev = snap->amp_y1;
+                s_amp_y_bot_prev = snap->amp_y2;
             }
         }
         lv_obj_invalidate(s_canvas_top);
         lv_obj_invalidate(s_canvas_bot);
 
-        // ~10 Hz label refresh. Only update while recording — once stopped,
-        // the displayed nasalance/time is the locked-in result set by btn_stop_cb.
+        // ~label refresh. Only update while recording — once stopped, the
+        // displayed nasalance/time is the locked-in result set by btn_stop_cb.
         if (++ui_tick >= 5) {
             ui_tick = 0;
             if (s_rec_state == REC_RUNNING) {
@@ -1087,23 +1264,6 @@ static void spectro_task(void *arg) {
             }
         }
         lv_unlock();
-
-        if (HOP < N) {
-            memmove(s1, s1 + HOP, (N - HOP) * sizeof(int32_t));
-            memmove(s2, s2 + HOP, (N - HOP) * sizeof(int32_t));
-            r = a_mic_441_read_dual(s1 + (N - HOP), s2 + (N - HOP), HOP, 2000);
-            if (r == ESP_OK && s_rec_state == REC_RUNNING) {
-                wav_write_frames(s1 + (N - HOP), s2 + (N - HOP), HOP);
-            }
-        } else {
-            r = a_mic_441_read_dual(s1, s2, N, 2000);
-            if (r == ESP_OK && s_rec_state == REC_RUNNING) {
-                wav_write_frames(s1, s2, N);
-            }
-        }
-        if (r != ESP_OK) {
-            warn(TAG, "mic read: %s", esp_err_to_name(r));
-        }
     }
 }
 
@@ -1136,9 +1296,40 @@ esp_err_t nasometer_init(void) {
     nvs_load_options();
     build_ui();
 
-    BaseType_t r = xTaskCreatePinnedToCore(spectro_task, "nasometer", 8192, NULL, 4, NULL, 0);
+    // Capture -> render hand-off objects.
+    s_spec = heap_caps_malloc(sizeof(spectrum_t), MALLOC_CAP_INTERNAL);
+    s_spec_mu = xSemaphoreCreateMutex();
+    s_frame_ready = xSemaphoreCreateBinary();
+    if (!s_spec || !s_spec_mu || !s_frame_ready) {
+        err(TAG, "hand-off allocation failed");
+        return ESP_ERR_NO_MEM;
+    }
+
+    // WAV PCM stream (capture -> writer), storage in PSRAM.
+    uint8_t *wav_storage = heap_caps_malloc(WAV_STREAM_BYTES + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!wav_storage) {
+        err(TAG, "WAV stream allocation failed");
+        return ESP_ERR_NO_MEM;
+    }
+    s_wav_stream = xStreamBufferCreateStatic(WAV_STREAM_BYTES, 1, wav_storage, &s_wav_stream_struct);
+
+    // Three tasks so neither the display nor SD can stall the mic read:
+    //  - capture (core 1, high prio): the only mic reader; never blocks downstream.
+    //  - render  (core 1, low prio):  capture preempts it; draws the latest frame.
+    //  - wav     (core 0, low prio):  SD write latency stays off core 1.
+    BaseType_t r = xTaskCreatePinnedToCore(capture_task, "nas_capture", 8192, NULL, 6, NULL, 1);
     if (r != pdPASS) {
-        err(TAG, "failed to create spectro task");
+        err(TAG, "failed to create capture task");
+        return ESP_FAIL;
+    }
+    r = xTaskCreatePinnedToCore(render_task, "nas_render", 8192, NULL, 3, NULL, 1);
+    if (r != pdPASS) {
+        err(TAG, "failed to create render task");
+        return ESP_FAIL;
+    }
+    r = xTaskCreatePinnedToCore(wav_writer_task, "nas_wav", 4096, NULL, 3, NULL, 0);
+    if (r != pdPASS) {
+        err(TAG, "failed to create wav writer task");
         return ESP_FAIL;
     }
 

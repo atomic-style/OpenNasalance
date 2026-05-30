@@ -9,6 +9,7 @@
 #include "init_touch.h"
 
 #include "atomic_err.h"
+#include "atomic_lcd.h"
 #include "atomic_log.h"
 #include "atomic_touch.h"
 #include "config.h"
@@ -38,6 +39,8 @@ static void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
 esp_err_t init_touch(void) {
     notice(TAG, "init_touch()");
 
+    // Touch rotation is published by the LCD board so panel orientation and
+    // touch orientation can never drift. See a_lcd_cfg_t.touch_rotation_ccw.
     atomic_touch_cfg_t cfg = {
         .i2c_port = TOUCH_I2C_PORT,
         .pin_sda = PIN_TOUCH_SDA,
@@ -46,7 +49,7 @@ esp_err_t init_touch(void) {
         .pin_int = PIN_TOUCH_INT,
         .native_w = TOUCH_NATIVE_W,
         .native_h = TOUCH_NATIVE_H,
-        .rotation_ccw = TOUCH_ROTATION_CCW,
+        .rotation_ccw = a_lcd_get()->cfg->touch_rotation_ccw,
     };
     try(atomic_touch_init(&cfg));
 

@@ -1,9 +1,11 @@
 idf_component_register(
     SRCS
         "src/a_mic.c"
+        "src/atomic_mic.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
-        esp_driver_i2s
+        atomic_gpio
         atomic_util
+        esp_driver_i2s
 )

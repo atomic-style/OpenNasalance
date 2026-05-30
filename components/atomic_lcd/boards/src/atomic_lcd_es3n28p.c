@@ -22,13 +22,17 @@
 
 static const char *TAG = "䋧";
 
-// Native panel orientation is portrait 240x320. We rotate 90° CCW at the
-// MADCTL level (swap_xy + mirror_y), so higher layers see landscape 320x240.
+// Native panel orientation is portrait 240x320. We rotate at the MADCTL level
+// (swap_xy + mirror_x → MV=1, MX=1, MY=0) so higher layers see landscape
+// 320x240. The matching touch rotation lives in a_lcd_cfg.touch_rotation_ccw
+// just below — keep these two in lockstep.
 #define ES3N28P_H_RES 320
 #define ES3N28P_V_RES 240
 #define ES3N28P_BPP 16
 #define ES3N28P_RGB_ELE_ORDER LCD_BGR
 #define ES3N28P_MAX_TRANSFER_SZ (ES3N28P_H_RES * 40 * ES3N28P_BPP / 8)
+// Display MADCTL: MV=1, MX=1, MY=0  ⇒  touch needs +90° CCW from native.
+#define ES3N28P_TOUCH_ROTATION_CCW 90
 
 #define PIN_LCD_CS 10
 #define PIN_LCD_DC 46
@@ -44,6 +48,7 @@ static const a_lcd_cfg_t a_lcd_cfg = {
     .bpp = ES3N28P_BPP,
     .rgb = ES3N28P_RGB_ELE_ORDER,
     .max_transfer_sz = ES3N28P_MAX_TRANSFER_SZ,
+    .touch_rotation_ccw = ES3N28P_TOUCH_ROTATION_CCW,
 };
 
 // QDtech's factory init sequence for ILI9341V on this module. Translated
@@ -67,10 +72,12 @@ static const ili9341_lcd_init_cmd_t qd_ili9341v_init[] = {
     {0xF2, (uint8_t[]){0x00}, 1, 0},
     {0x26, (uint8_t[]){0x01}, 1, 0},
     {0xE0,
-     (uint8_t[]){0x0F, 0x35, 0x31, 0x0B, 0x0E, 0x06, 0x49, 0xA7, 0x33, 0x07, 0x0F, 0x03, 0x0C, 0x0A, 0x00},
+     (uint8_t[]){0x0F, 0x35, 0x31, 0x0B, 0x0E, 0x06, 0x49, 0xA7, 0x33, 0x07,
+                 0x0F, 0x03, 0x0C, 0x0A, 0x00},
      15, 0},
     {0xE1,
-     (uint8_t[]){0x00, 0x0A, 0x0F, 0x04, 0x11, 0x08, 0x36, 0x58, 0x4D, 0x07, 0x10, 0x0C, 0x32, 0x34, 0x0F},
+     (uint8_t[]){0x00, 0x0A, 0x0F, 0x04, 0x11, 0x08, 0x36, 0x58, 0x4D, 0x07,
+                 0x10, 0x0C, 0x32, 0x34, 0x0F},
      15, 0},
 };
 
@@ -113,33 +120,34 @@ static esp_lcd_panel_dev_config_t a_dev_cfg = {
 };
 
 esp_err_t a_lcd_es3n28p(a_lcd_t *lcd,
-                        bool (*cb)(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event_data_t *, void *)) {
-    info(TAG, "a_lcd_es3n28p()");
-    esp_lcd_panel_handle_t panel = NULL;
-    esp_lcd_panel_io_handle_t io_handle = NULL;
+                        bool (*cb)(esp_lcd_panel_io_handle_t,
+                                   esp_lcd_panel_io_event_data_t *, void *)) {
+  info(TAG, "a_lcd_es3n28p()");
+  esp_lcd_panel_handle_t panel = NULL;
+  esp_lcd_panel_io_handle_t io_handle = NULL;
 
-    info(TAG, "spi bus init host=%d", LCD_SPI_HOST);
-    try(spi_bus_initialize(LCD_SPI_HOST, &a_spi_bus_cfg, SPI_DMA_CH_AUTO));
+  info(TAG, "spi bus init host=%d", LCD_SPI_HOST);
+  try(spi_bus_initialize(LCD_SPI_HOST, &a_spi_bus_cfg, SPI_DMA_CH_AUTO));
 
-    a_spi_io_cfg.on_color_trans_done = cb;
-    try(esp_lcd_new_panel_io_spi(LCD_SPI_HOST, &a_spi_io_cfg, &io_handle));
-    try(esp_lcd_new_panel_ili9341(io_handle, &a_dev_cfg, &panel));
+  a_spi_io_cfg.on_color_trans_done = cb;
+  try(esp_lcd_new_panel_io_spi(LCD_SPI_HOST, &a_spi_io_cfg, &io_handle));
+  try(esp_lcd_new_panel_ili9341(io_handle, &a_dev_cfg, &panel));
 
-    try(esp_lcd_panel_reset(panel));
-    try(esp_lcd_panel_init(panel));
-    // 90° CCW rotation: MADCTL MV=1, MY=1, MX=0
-    try(esp_lcd_panel_swap_xy(panel, true));
-    try(esp_lcd_panel_mirror(panel, false, true));
-    try(esp_lcd_panel_disp_on_off(panel, true));
+  try(esp_lcd_panel_reset(panel));
+  try(esp_lcd_panel_init(panel));
+  // 90° CW rotation (180° flipped from 90° CCW): MADCTL MV=1, MX=1, MY=0
+  try(esp_lcd_panel_swap_xy(panel, true));
+  try(esp_lcd_panel_mirror(panel, true, false));
+  try(esp_lcd_panel_disp_on_off(panel, true));
 
-    atomic_gpio_config_out(PIN_LCD_BL, false, false);
-    atomic_gpio_set(PIN_LCD_BL, 1);
+  atomic_gpio_config_out(PIN_LCD_BL, false, false);
+  atomic_gpio_set(PIN_LCD_BL, 1);
 
-    lcd->id = LCD_ES3N28P;
-    lcd->panel = panel;
-    lcd->cfg = &a_lcd_cfg;
-    lcd->io_handle = io_handle;
+  lcd->id = LCD_ES3N28P;
+  lcd->panel = panel;
+  lcd->cfg = &a_lcd_cfg;
+  lcd->io_handle = io_handle;
 
-    info(TAG, "es3n28p up: %dx%d", ES3N28P_H_RES, ES3N28P_V_RES);
-    return ESP_OK;
+  info(TAG, "es3n28p up: %dx%d", ES3N28P_H_RES, ES3N28P_V_RES);
+  return ESP_OK;
 }

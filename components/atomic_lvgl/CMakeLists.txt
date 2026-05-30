@@ -1,6 +1,8 @@
 idf_component_register(
     SRCS
         "src/atomic_lvgl.c"
+        "src/lcars48.c"
+        "src/atomic_lvgl_clock.c"
         "src/atomic_lvgl_test.c"
         "src/atomic_lvgl_jpeg.c"
         "src/atomic_lvgl_fs.c"
@@ -13,7 +15,8 @@ idf_component_register(
         esp_timer
         esp_lcd
         atomic_bits
-atomic_util
+        atomic_net
+        atomic_util
         atomic_lcd
         esp_psram
         atomic_info

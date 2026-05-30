@@ -108,8 +108,8 @@
 #define LV_USE_ASSERT_OBJ 0
 
 #define LV_ASSERT_HANDLER_INCLUDE <stdint.h>
-#define LV_ASSERT_HANDLER                                                                          \
-    while (1)                                                                                      \
+#define LV_ASSERT_HANDLER                                                                                              \
+    while (1)                                                                                                          \
         ;
 
 // Debug
@@ -156,15 +156,15 @@
 
 #define LV_FONT_MONTSERRAT_8 0
 #define LV_FONT_MONTSERRAT_10 0
-#define LV_FONT_MONTSERRAT_12 0
+#define LV_FONT_MONTSERRAT_12 1
 #define LV_FONT_MONTSERRAT_14 1
-#define LV_FONT_MONTSERRAT_16 0
+#define LV_FONT_MONTSERRAT_16 1
 #define LV_FONT_MONTSERRAT_18 0
 #define LV_FONT_MONTSERRAT_20 0
 #define LV_FONT_MONTSERRAT_22 0
-#define LV_FONT_MONTSERRAT_24 0
+#define LV_FONT_MONTSERRAT_24 1
 #define LV_FONT_MONTSERRAT_26 0
-#define LV_FONT_MONTSERRAT_28 0
+#define LV_FONT_MONTSERRAT_28 1
 #define LV_FONT_MONTSERRAT_30 0
 #define LV_FONT_MONTSERRAT_32 0
 #define LV_FONT_MONTSERRAT_34 0
@@ -219,7 +219,7 @@
 #define LV_USE_DROPDOWN 0
 #define LV_USE_IMAGE 1
 #define LV_USE_IMAGEBUTTON 0
-#define LV_USE_KEYBOARD 0
+#define LV_USE_KEYBOARD 1
 #define LV_USE_LABEL 1
 #if LV_USE_LABEL
 #define LV_LABEL_TEXT_SELECTION 0
@@ -228,7 +228,7 @@
 #endif
 #define LV_USE_LED 0
 #define LV_USE_LINE 0
-#define LV_USE_LIST 0
+#define LV_USE_LIST 1
 #define LV_USE_LOTTIE 0
 #define LV_USE_MENU 0
 #define LV_USE_MSGBOX 0
@@ -244,7 +244,7 @@
 #define LV_USE_SWITCH 0
 #define LV_USE_TABLE 0
 #define LV_USE_TABVIEW 0
-#define LV_USE_TEXTAREA 0
+#define LV_USE_TEXTAREA 1
 #if LV_USE_TEXTAREA != 0
 #define LV_TEXTAREA_DEF_PWD_SHOW_TIME 1500
 #endif
@@ -264,7 +264,7 @@
 #define LV_USE_THEME_MONO 0
 
 // Layouts
-#define LV_USE_FLEX 0
+#define LV_USE_FLEX 1
 #define LV_USE_GRID 0
 
 // 3rd Parts Libraries

@@ -1,6 +1,18 @@
 idf_component_register(
     SRCS
         "src/atomic_ui.c"
+        "src/atomic_ui_theme.c"
+        "src/atomic_ui_theme_dark.c"
+        "src/atomic_ui_widgets.c"
+        "src/atomic_ui_clock.c"
+        "src/atomic_ui_battery.c"
+        "src/atomic_ui_wifi.c"
+        "assets/prompt.c"
+        "assets/prompt_18.c"
+        "assets/prompt_48.c"
+        "assets/prompt_semibold.c"
+        "assets/prompt_semibold_18.c"
+        "assets/prompt_semibold_48.c"
     INCLUDE_DIRS
         "include"
     EMBED_FILES
@@ -9,5 +21,7 @@ idf_component_register(
         atomic_util
         atomic_bits
         atomic_lvgl
+        atomic_net
+        atomic_nvs
         lvgl__lvgl
 )

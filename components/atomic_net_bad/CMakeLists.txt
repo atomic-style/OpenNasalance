@@ -1,0 +1,24 @@
+idf_component_register(
+    SRCS
+        "src/atomic_net.c"
+        "src/atomic_wifi.c"
+        "src/atomic_wifi_evt.c"
+        "src/atomic_ntp.c"
+        "src/atomic_mqtt.c"
+        "src/atomic_ha.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        esp_netif
+        esp_wifi
+        esp_event
+        esp_timer
+        lwip
+        atomic_util
+        atomic_bits
+        atomic_nvs
+        atomic_json
+        atomic_audio
+        atomic_sensors
+        espressif__mqtt
+)

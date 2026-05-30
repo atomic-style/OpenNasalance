@@ -1,11 +1,3 @@
-// Copyright (C) 2026 Atomic Style, LLC
-// SPDX-License-Identifier: GPL-3.0-or-later
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-
 #include "atomic_lvgl_clock.h"
 
 #include <stdio.h>
@@ -21,6 +13,7 @@
 
 //static const char *TAG = "atomic_lvgl_clock";
 
+LV_FONT_DECLARE(lcars48);
 #define USE_SCALE
 
 static void atomic_lvgl_clock_task(void *arg)
@@ -47,8 +40,9 @@ static void atomic_lvgl_clock_task(void *arg)
 	lv_obj_align(clock_bk, LV_ALIGN_CENTER, 0, 0);
 
 	lv_obj_t *c_label = lv_label_create(clock_bk);
-	lv_obj_set_style_text_font(c_label, &lv_font_unscii_16, LV_PART_MAIN);
+	lv_obj_set_style_text_font(c_label, &lcars48, LV_PART_MAIN);
 	lv_obj_set_style_text_color(c_label, lv_color_white(), 0);
+	// lv_obj_set_style_text_font(c_label, lcars24, 0);
 	lv_obj_set_style_bg_color(c_label, col_blue, 0);
 	lv_label_set_text(c_label, c_str);
 

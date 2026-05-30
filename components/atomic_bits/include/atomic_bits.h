@@ -1,11 +1,3 @@
-// Copyright (C) 2026 Atomic Style, LLC
-// SPDX-License-Identifier: GPL-3.0-or-later
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-
 #pragma once
 
 #include "esp_err.h"
@@ -19,7 +11,10 @@
 #define BIT_WIFI_START BIT5
 #define BIT_WIFI_WAIT BIT6
 #define BIT_WIFI_READY BIT7
-#define BIT_WIFI_LOW_POWER BIT8
+// BIT8 was BIT_WIFI_LOW_POWER (never set/read anywhere) — reclaimed for AP
+// readiness. FreeRTOS only allows 24 usable bits (top 8 are kernel-reserved),
+// so BIT24+ is off-limits and we have to recycle slots.
+#define BIT_WIFI_AP_READY BIT8
 #define BIT_NET_TASK BIT9
 #define BIT_NTP_ENABLE BIT10
 #define BIT_NTP_INIT BIT11
@@ -40,6 +35,9 @@ esp_err_t a_bits_init(void);
 bool a_bits(EventBits_t bit);
 void a_bits_set(EventBits_t bits);
 void a_bits_wait(EventBits_t bit);
+// Block until ANY one of the given bits is set. Returns the snapshot of bits
+// that were set at unblock time so the caller can tell which one fired.
+EventBits_t a_bits_wait_any(EventBits_t bits);
 void a_bits_clear(EventBits_t bits);
 
 /*

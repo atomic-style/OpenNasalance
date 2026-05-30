@@ -53,6 +53,10 @@ typedef struct a_lcd_cfg_s {
     int bpp;
     a_rgb_order_t rgb;
     int max_transfer_sz;
+    // Rotation, in degrees CCW, that turns raw touch coordinates into display
+    // coordinates for this panel orientation. Whoever configures MADCTL also
+    // owns this — keep them in lockstep. 0 if unused.
+    int touch_rotation_ccw;
 } a_lcd_cfg_t;
 
 typedef struct a_lcd_gpio_cfg_s {

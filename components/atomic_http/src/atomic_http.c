@@ -12,7 +12,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include <dirent.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -26,9 +28,15 @@ static httpd_handle_t s_server = NULL;
 static esp_timer_handle_t s_heartbeat_timer = NULL;
 static const char *s_unit_name = "unknown";
 
-static SemaphoreHandle_t s_clients_mu = NULL;
-static int s_clients[MAX_WS_CLIENTS];
-static int s_client_count = 0;
+// IDF's WS dispatcher (httpd_uri.c:362) explicitly does NOT call our handler
+// for the initial GET — it sends the 101 and stashes our handler for future
+// inbound frames only. So we can't register clients from the handler. Instead
+// we discover live WS sockets on every broadcast via httpd_get_client_list +
+// httpd_ws_get_fd_info. s_hello_sent tracks which fds we've already greeted
+// so each new client gets exactly one hello, regardless of which tick first
+// observes it. Stale fds are pruned each heartbeat.
+static int s_hello_sent[MAX_WS_CLIENTS];
+static volatile bool s_has_ws_clients = false; // last-known, updated by heartbeat
 
 // Producer→consumer single-slot frame buffer. Producer (DSP task) overwrites
 // last frame if consumer hasn't drained it yet — keeps the producer cheap and
@@ -43,43 +51,60 @@ extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[] asm("_binary_index_html_end");
 
 // ---------------------------------------------------------------------------
-// client list (protected by s_clients_mu)
+// Live WS client discovery (replaces the old hand-rolled client list).
+//
+// httpd_get_client_list returns every fd the server currently knows about
+// (both plain HTTP and WS); httpd_ws_get_fd_info filters those down to the
+// ones in the WebSocket state. This is the only reliable way to enumerate
+// WS clients because IDF's WS dispatcher never calls our handler for the
+// initial handshake (see comment block on s_hello_sent above).
 // ---------------------------------------------------------------------------
 
-static void clients_add(int fd) {
-    xSemaphoreTake(s_clients_mu, portMAX_DELAY);
-    for (int i = 0; i < s_client_count; i++) {
-        if (s_clients[i] == fd) {
-            xSemaphoreGive(s_clients_mu);
+// Fill `out` with at most `max` live WS-state fds. Returns the count.
+static int ws_clients(int *out, int max) {
+    if (!s_server) return 0;
+    int all[MAX_WS_CLIENTS * 2 + 4]; // small overhead in case non-WS HTTP fds exist
+    size_t n = sizeof all / sizeof all[0];
+    if (httpd_get_client_list(s_server, &n, all) != ESP_OK) return 0;
+    int k = 0;
+    for (size_t i = 0; i < n && k < max; i++) {
+        if (httpd_ws_get_fd_info(s_server, all[i]) == HTTPD_WS_CLIENT_WEBSOCKET) {
+            out[k++] = all[i];
+        }
+    }
+    return k;
+}
+
+static bool hello_already_sent(int fd) {
+    for (int i = 0; i < MAX_WS_CLIENTS; i++) {
+        if (s_hello_sent[i] == fd) return true;
+    }
+    return false;
+}
+
+static void hello_mark_sent(int fd) {
+    for (int i = 0; i < MAX_WS_CLIENTS; i++) {
+        if (s_hello_sent[i] == 0) {
+            s_hello_sent[i] = fd;
             return;
         }
     }
-    if (s_client_count < MAX_WS_CLIENTS) {
-        s_clients[s_client_count++] = fd;
-        info(TAG, "ws client added fd=%d (total=%d)", fd, s_client_count);
-    } else {
-        warn(TAG, "ws client list full, rejecting fd=%d", fd);
-    }
-    xSemaphoreGive(s_clients_mu);
 }
 
-static void clients_remove(int fd) {
-    xSemaphoreTake(s_clients_mu, portMAX_DELAY);
-    for (int i = 0; i < s_client_count; i++) {
-        if (s_clients[i] == fd) {
-            s_clients[i] = s_clients[--s_client_count];
-            info(TAG, "ws client removed fd=%d (total=%d)", fd, s_client_count);
-            break;
+// Drop hello-set entries that are no longer in the live list (the fd was
+// closed). Keeps s_hello_sent from filling up over time.
+static void hello_prune(const int *live, int n_live) {
+    for (int i = 0; i < MAX_WS_CLIENTS; i++) {
+        if (s_hello_sent[i] == 0) continue;
+        bool still = false;
+        for (int j = 0; j < n_live; j++) {
+            if (live[j] == s_hello_sent[i]) {
+                still = true;
+                break;
+            }
         }
+        if (!still) s_hello_sent[i] = 0;
     }
-    xSemaphoreGive(s_clients_mu);
-}
-
-static void clients_snapshot(int *out, int *out_count) {
-    xSemaphoreTake(s_clients_mu, portMAX_DELAY);
-    *out_count = s_client_count;
-    memcpy(out, s_clients, s_client_count * sizeof(int));
-    xSemaphoreGive(s_clients_mu);
 }
 
 // ---------------------------------------------------------------------------
@@ -95,6 +120,105 @@ static const httpd_uri_t s_root_uri = {
     .uri = "/",
     .method = HTTP_GET,
     .handler = root_handler,
+    .user_ctx = NULL,
+};
+
+// ---------------------------------------------------------------------------
+// File access — list and download recordings from the SD mount (/sd)
+// ---------------------------------------------------------------------------
+
+#define SD_MOUNT "/sd"
+
+// GET /files — minimal HTML index of files on the SD card with download links.
+static esp_err_t files_handler(httpd_req_t *req) {
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    httpd_resp_sendstr_chunk(
+        req, "<!doctype html><meta name=viewport content=\"width=device-width\">"
+             "<title>Recordings</title><h2>Recordings</h2><ul>");
+    DIR *d = opendir(SD_MOUNT);
+    if (!d) {
+        httpd_resp_sendstr_chunk(req, "<li><em>SD card not mounted</em></li>");
+    } else {
+        struct dirent *de;
+        char line[320];
+        int n = 0;
+        while ((de = readdir(d)) != NULL) {
+            if (de->d_type != DT_REG) continue;
+            // Bound each %s: d_name can be up to 255 bytes, but our recordings
+            // are short. Precision keeps the line within the buffer.
+            snprintf(line, sizeof(line), "<li><a href=\"/download?f=%.120s\">%.120s</a></li>",
+                     de->d_name, de->d_name);
+            httpd_resp_sendstr_chunk(req, line);
+            n++;
+        }
+        closedir(d);
+        if (n == 0) httpd_resp_sendstr_chunk(req, "<li><em>(no files yet)</em></li>");
+    }
+    httpd_resp_sendstr_chunk(req, "</ul>");
+    httpd_resp_sendstr_chunk(req, NULL); // end response
+    return ESP_OK;
+}
+
+static const httpd_uri_t s_files_uri = {
+    .uri = "/files",
+    .method = HTTP_GET,
+    .handler = files_handler,
+    .user_ctx = NULL,
+};
+
+// GET /download?f=<name> — stream a single file from /sd as an attachment.
+static esp_err_t download_handler(httpd_req_t *req) {
+    char query[128];
+    char name[80];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+        httpd_query_key_value(query, "f", name, sizeof(name)) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "missing 'f' parameter");
+        return ESP_FAIL;
+    }
+    // Reject path traversal — only a bare filename within /sd is allowed.
+    if (name[0] == '\0' || strchr(name, '/') || strstr(name, "..")) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid filename");
+        return ESP_FAIL;
+    }
+
+    char path[96];
+    snprintf(path, sizeof(path), "%s/%s", SD_MOUNT, name);
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "file not found");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "audio/wav");
+    char cd[128];
+    snprintf(cd, sizeof(cd), "attachment; filename=\"%s\"", name);
+    httpd_resp_set_hdr(req, "Content-Disposition", cd);
+
+    char *buf = malloc(2048);
+    if (!buf) {
+        fclose(f);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");
+        return ESP_FAIL;
+    }
+    size_t n;
+    esp_err_t ret = ESP_OK;
+    while ((n = fread(buf, 1, 2048, f)) > 0) {
+        if (httpd_resp_send_chunk(req, buf, n) != ESP_OK) {
+            warn(TAG, "download: client aborted %s", name);
+            ret = ESP_FAIL;
+            break;
+        }
+    }
+    free(buf);
+    fclose(f);
+    if (ret == ESP_OK) httpd_resp_send_chunk(req, NULL, 0); // end response
+    return ret;
+}
+
+static const httpd_uri_t s_download_uri = {
+    .uri = "/download",
+    .method = HTTP_GET,
+    .handler = download_handler,
     .user_ctx = NULL,
 };
 
@@ -120,18 +244,11 @@ static esp_err_t ws_send_binary(int fd, const uint8_t *payload, size_t len) {
     return httpd_ws_send_frame_async(s_server, fd, &frame);
 }
 
+// IDF's dispatcher never calls this handler for the initial GET — it sends
+// the 101 itself and stashes a pointer to us for *inbound* frames only.
+// So the handshake / hello logic lives in broadcast_heartbeat instead; this
+// just drains anything the client decides to send us (currently nothing).
 static esp_err_t ws_handler(httpd_req_t *req) {
-    if (req->method == HTTP_GET) {
-        // handshake — register the client and send hello
-        int fd = httpd_req_to_sockfd(req);
-        clients_add(fd);
-        char hello[96];
-        snprintf(hello, sizeof(hello), "{\"type\":\"hello\",\"unit\":\"%s\"}", s_unit_name);
-        ws_send_text(fd, hello);
-        return ESP_OK;
-    }
-
-    // inbound frame — Phase 2 just drains / logs
     httpd_ws_frame_t frame = {0};
     esp_err_t ok = httpd_ws_recv_frame(req, &frame, 0);
     if (ok != ESP_OK) {
@@ -157,11 +274,6 @@ static const httpd_uri_t s_ws_uri = {
     .is_websocket = true,
 };
 
-static void ws_close_cb(httpd_handle_t hd, int sockfd) {
-    clients_remove(sockfd);
-    close(sockfd);
-}
-
 // ---------------------------------------------------------------------------
 // DSP frame producer/consumer
 // ---------------------------------------------------------------------------
@@ -175,10 +287,10 @@ void a_http_push_frame(const uint8_t *top_bins,
     if (!s_frame_mu) return; // server not up yet
     if (n_bins <= 0 || n_bins > A_HTTP_MAX_BINS) return;
     if (!top_bins || !bot_bins) return;
-    // Fast-path skip if no clients are listening — no point formatting bytes
-    // we'd just throw away. Read s_client_count without locking; a stale read
-    // here is harmless (worst case: one frame too many or too few).
-    if (s_client_count == 0) return;
+    // Fast-path skip if no WS clients connected. s_has_ws_clients is updated
+    // by the 1 Hz heartbeat tick, so there's up to 1 s of lag after a new
+    // client appears before binary frames start flowing — acceptable here.
+    if (!s_has_ws_clients) return;
 
     if (xSemaphoreTake(s_frame_mu, 0) != pdTRUE) return; // drop if contended
 
@@ -214,13 +326,13 @@ static void broadcast_frame(void *arg) {
     if (local_len == 0) return;
 
     int fds[MAX_WS_CLIENTS];
-    int n;
-    clients_snapshot(fds, &n);
+    int n = ws_clients(fds, MAX_WS_CLIENTS);
     for (int i = 0; i < n; i++) {
         esp_err_t ok = ws_send_binary(fds[i], local, local_len);
         if (ok != ESP_OK) {
-            warn(TAG, "ws_send_binary fd=%d FAIL: %s — dropping", fds[i], esp_err_to_name(ok));
-            clients_remove(fds[i]);
+            warn(TAG, "ws_send_binary fd=%d FAIL: %s", fds[i], esp_err_to_name(ok));
+            // No client-list to remove from; the next heartbeat will observe
+            // the closed fd and update s_has_ws_clients / hello_prune.
         }
     }
 }
@@ -240,19 +352,31 @@ static void broadcast_task(void *arg) {
 
 static void broadcast_heartbeat(void *arg) {
     int fds[MAX_WS_CLIENTS];
-    int n;
-    clients_snapshot(fds, &n);
+    int n = ws_clients(fds, MAX_WS_CLIENTS);
+    s_has_ws_clients = (n > 0);
+    hello_prune(fds, n);
     if (n == 0) return;
+
+    // Send hello once per new client. The handshake completes before our
+    // handler ever runs (IDF dispatches it itself), so this tick is the
+    // first place we can observe a freshly-connected fd.
+    char hello[96];
+    snprintf(hello, sizeof(hello), "{\"type\":\"hello\",\"unit\":\"%s\"}", s_unit_name);
+    for (int i = 0; i < n; i++) {
+        if (hello_already_sent(fds[i])) continue;
+        if (ws_send_text(fds[i], hello) == ESP_OK) {
+            hello_mark_sent(fds[i]);
+            info(TAG, "ws hello → fd=%d", fds[i]);
+        }
+    }
 
     char msg[64];
     int64_t uptime_us = esp_timer_get_time();
     snprintf(msg, sizeof(msg), "{\"type\":\"heartbeat\",\"uptime\":%lld}", uptime_us / 1000000LL);
-
     for (int i = 0; i < n; i++) {
         esp_err_t ok = ws_send_text(fds[i], msg);
         if (ok != ESP_OK) {
-            warn(TAG, "ws_send fd=%d FAIL: %s — dropping", fds[i], esp_err_to_name(ok));
-            clients_remove(fds[i]);
+            warn(TAG, "ws_send hb fd=%d FAIL: %s", fds[i], esp_err_to_name(ok));
         }
     }
 }
@@ -268,21 +392,26 @@ static void heartbeat_tick(void *arg) {
 // ---------------------------------------------------------------------------
 
 static void log_listen_addr(void) {
-    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-    if (!sta) {
-        warn(TAG, "no STA netif — cannot report listen address");
+    // Report whichever interface has an IP. In AP mode the STA netif exists
+    // (atomic_wifi creates both up-front) but reads 0.0.0.0 — fall through to
+    // the AP netif in that case.
+    const char *keys[] = {"WIFI_STA_DEF", "WIFI_AP_DEF"};
+    for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++) {
+        esp_netif_t *nif = esp_netif_get_handle_from_ifkey(keys[i]);
+        if (!nif) continue;
+        esp_netif_ip_info_t ip;
+        if (esp_netif_get_ip_info(nif, &ip) != ESP_OK) continue;
+        if (ip.ip.addr == 0) continue;
+        info(TAG, "http server up at http://" IPSTR "/ (%s)", IP2STR(&ip.ip), keys[i]);
         return;
     }
-    esp_netif_ip_info_t ip;
-    if (esp_netif_get_ip_info(sta, &ip) != ESP_OK) {
-        warn(TAG, "esp_netif_get_ip_info() failed");
-        return;
-    }
-    info(TAG, "http server up at http://" IPSTR "/", IP2STR(&ip.ip));
+    warn(TAG, "http server started but no interface has an IP yet");
 }
 
 static void http_start_task(void *arg) {
-    a_bits_wait(BIT_WIFI_READY);
+    // Start as soon as either interface is up: STA got a DHCP lease, OR
+    // the SoftAP is broadcasting. The server binds to all netifs.
+    a_bits_wait_any(BIT_WIFI_READY | BIT_WIFI_AP_READY);
 
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.stack_size = 8192;
@@ -290,7 +419,9 @@ static void http_start_task(void *arg) {
     // CONFIG_LWIP_MAX_SOCKETS is 12 in defaults (3 reserved by httpd internally).
     // Keep the cap conservative until we measure under real WS load.
     cfg.max_open_sockets = 7;
-    cfg.close_fn = ws_close_cb;
+    // No custom close_fn: with the hand-rolled client list gone, the IDF
+    // default (which just close()s the socket) is sufficient. Stale entries
+    // in s_hello_sent are pruned on the next heartbeat tick.
 
     esp_err_t ok = httpd_start(&s_server, &cfg);
     if (ok != ESP_OK) {
@@ -302,6 +433,8 @@ static void http_start_task(void *arg) {
 
     httpd_register_uri_handler(s_server, &s_root_uri);
     httpd_register_uri_handler(s_server, &s_ws_uri);
+    httpd_register_uri_handler(s_server, &s_files_uri);
+    httpd_register_uri_handler(s_server, &s_download_uri);
 
     const esp_timer_create_args_t targs = {
         .callback = heartbeat_tick,
@@ -321,10 +454,9 @@ esp_err_t a_http_init(const char *unit_name) {
     }
     info(TAG, "a_http_init()");
     if (unit_name) s_unit_name = unit_name;
-    s_clients_mu = xSemaphoreCreateMutex();
     s_frame_mu = xSemaphoreCreateMutex();
     s_frame_sem = xSemaphoreCreateBinary();
-    if (!s_clients_mu || !s_frame_mu || !s_frame_sem) return ESP_ERR_NO_MEM;
+    if (!s_frame_mu || !s_frame_sem) return ESP_ERR_NO_MEM;
 
     BaseType_t ok = xTaskCreate(http_start_task, "a_http_start", 4096, NULL, 5, NULL);
     if (ok != pdPASS) return ESP_ERR_NO_MEM;

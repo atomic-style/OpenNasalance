@@ -19,9 +19,9 @@ idf_component_register(
         atomic_lvgl
         atomic_mic
         atomic_net
+        atomic_http
         atomic_touch
         atomic_sd
         atomic_bme280
         atomic_ui
-        atomic_http
 )
