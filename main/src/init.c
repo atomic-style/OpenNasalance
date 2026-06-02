@@ -183,12 +183,29 @@ void init() {
     esp_err_t mic_r = a_mic_441_init(&a_mic_cfg);
 #endif
     if (mic_r != ESP_OK) {
-        warn(TAG, "mic init failed: %s — nasometer will show no data",
-             esp_err_to_name(mic_r));
+        warn(TAG, "mic init failed: %s — nasometer will show no data", esp_err_to_name(mic_r));
     }
-    try(nasometer_init());
 #endif // ENABLE_MIC
 
+#ifdef ENABLE_ATOMIC_MIC
+
+    a_mic_config_t a_mic_cfg = {
+        .pin_clk = PIN_MIC_CLK,
+        .pin_data = PIN_MIC_DATA,
+        .format = I2S_PDM_DATA_FMT_PCM, // I2S_PDM_DATA_FMT_RAW,
+        .slot = I2S_PDM_SLOT_BOTH,
+    };
+    ESP_LOGI(TAG, "init calling atomic_mic_init()");
+    esp_err_t ok = a_mic_init(&a_mic_cfg);
+    if (ok != ESP_OK) {
+        ESP_LOGE(TAG, "atomic_mic_init() error %s", esp_err_to_name(ok));
+    }
+#endif
+
+#ifdef ENABLE_NASOMETER
+    try(nasometer_init());
     try(a_ui_clear());
+#endif
+
     info(TAG, "init() done.");
 }

@@ -6,6 +6,9 @@
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
+#include "config.h"
+#ifdef ENABLE_NASOMETER
+
 #include "nasometer.h"
 
 #include <dirent.h>
@@ -19,7 +22,6 @@
 #include "atomic_err.h"
 #include "atomic_log.h"
 #include "atomic_nvs.h"
-#include "config.h"
 #include "esp_err.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
@@ -272,16 +274,20 @@ static void bins_to_dbu8(const float *re, const float *im, uint8_t *out) {
         float mag2 = r * r + i * i;
         float db = (mag2 > 1e-20f) ? 10.0f * log10f(mag2) - ref_db : -200.0f;
         float t = (db - db_floor) / db_range;
-        if (t < 0.0f) t = 0.0f;
-        if (t > 1.0f) t = 1.0f;
+        if (t < 0.0f)
+            t = 0.0f;
+        if (t > 1.0f)
+            t = 1.0f;
         out[b] = (uint8_t)(t * 255.0f);
     }
 }
 
 static uint8_t amp_db_to_u8(float db) {
     float t = (db - AMP_TRACE_DB_FLOOR) / (AMP_TRACE_DB_CEIL - AMP_TRACE_DB_FLOOR);
-    if (t < 0.0f) t = 0.0f;
-    if (t > 1.0f) t = 1.0f;
+    if (t < 0.0f)
+        t = 0.0f;
+    if (t > 1.0f)
+        t = 1.0f;
     return (uint8_t)(t * 255.0f);
 }
 #endif // ENABLE_HTTP
@@ -629,7 +635,7 @@ static void wav_enqueue(const int32_t *s1, const int32_t *s2, size_t n) {
 // Slow SD writes here never reach the capture task.
 static void wav_writer_task(void *arg) {
     (void)arg;
-    int16_t in_buf[256];  // 128 L/R pairs per read
+    int16_t in_buf[256]; // 128 L/R pairs per read
     int16_t l_buf[128];
     int16_t r_buf[128];
     while (1) {
@@ -1065,7 +1071,7 @@ typedef struct {
     float re2[N], im2[N];
     int amp_y1, amp_y2;
 } spectrum_t;
-static spectrum_t *s_spec = NULL;              // shared latest frame, guarded by s_spec_mu
+static spectrum_t *s_spec = NULL; // shared latest frame, guarded by s_spec_mu
 static SemaphoreHandle_t s_spec_mu = NULL;
 static SemaphoreHandle_t s_frame_ready = NULL; // capture -> render, binary (last-write-wins)
 
@@ -1154,7 +1160,8 @@ static void capture_task(void *arg) {
             uint8_t nasal_pct = 255; // N/A while not recording
             if (s_rec_state == REC_RUNNING) {
                 double denom = s_nasal_sum + s_oral_sum;
-                if (denom > 1e-12) nasal_pct = (uint8_t)(100.0 * s_nasal_sum / denom + 0.5);
+                if (denom > 1e-12)
+                    nasal_pct = (uint8_t)(100.0 * s_nasal_sum / denom + 0.5);
             }
             a_http_push_frame(bins_top, bins_bot, BINS_OUT, amp_db_to_u8(amp_db1),
                               amp_db_to_u8(amp_db2), nasal_pct);
@@ -1306,12 +1313,14 @@ esp_err_t nasometer_init(void) {
     }
 
     // WAV PCM stream (capture -> writer), storage in PSRAM.
-    uint8_t *wav_storage = heap_caps_malloc(WAV_STREAM_BYTES + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint8_t *wav_storage =
+        heap_caps_malloc(WAV_STREAM_BYTES + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!wav_storage) {
         err(TAG, "WAV stream allocation failed");
         return ESP_ERR_NO_MEM;
     }
-    s_wav_stream = xStreamBufferCreateStatic(WAV_STREAM_BYTES, 1, wav_storage, &s_wav_stream_struct);
+    s_wav_stream =
+        xStreamBufferCreateStatic(WAV_STREAM_BYTES, 1, wav_storage, &s_wav_stream_struct);
 
     // Three tasks so neither the display nor SD can stall the mic read:
     //  - capture (core 1, high prio): the only mic reader; never blocks downstream.
@@ -1335,3 +1344,5 @@ esp_err_t nasometer_init(void) {
 
     return ESP_OK;
 }
+
+#endif

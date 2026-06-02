@@ -53,9 +53,11 @@ typedef enum {
 #define ENABLE_LVGL  // LVGL UI on top of ENABLE_LCD
 #define ENABLE_TOUCH // FT6336G capacitive touch
 #define ENABLE_SD    // SDMMC slot for WAV recording
-#define ENABLE_MIC   // Microphone capture (type selected in the pin block below)
-#define ENABLE_WIFI  // Wi-Fi via atomic_net (STA + AP runtime-switchable)
-#define ENABLE_HTTP  // HTTP server on port 80 (independent of ENABLE_WIFI mode)
+// #define ENABLE_MIC   // Microphone capture (type selected in the pin block below)
+#define ENABLE_WIFI // Wi-Fi via atomic_net (STA + AP runtime-switchable)
+#define ENABLE_HTTP // HTTP server on port 80 (independent of ENABLE_WIFI mode)
+// #define ENABLE_NASOMETER
+#define ENABLE_ATOMIC_MIC
 
 // Wi-Fi first-boot defaults — written to NVS only when the corresponding key
 // is missing. After first boot the device's persisted state wins; change via
@@ -149,6 +151,12 @@ typedef enum {
 #error "ENABLE_MIC set but no mic type selected (MIC_T5837 / MIC_441)"
 #endif
 #endif // ENABLE_MIC
+
+#ifdef ENABLE_ATOMIC_MIC
+#define PIN_MIC_CLK 21
+#define PIN_MIC_DATA 2
+// #define PIN_MIC_DATA_2 GPIO_NUM_NC
+#endif
 
 // FT6336G capacitive touch — shared I²C bus on the P4 expansion header.
 // Reset/INT are broken out on the capacitive-touch SKU only.

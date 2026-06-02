@@ -22,8 +22,8 @@ void app_main(void) {
     atomic_info_print();
     init();
 
-    atomic_info_print_heap();
-    atomic_info_print_task_stacks();
+    // atomic_info_print_heap();
+    // atomic_info_print_task_stacks();
 
     uint32_t cnt = 0;
     while (1) {
